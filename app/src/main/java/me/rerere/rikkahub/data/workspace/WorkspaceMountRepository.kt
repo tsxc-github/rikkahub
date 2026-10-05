@@ -58,7 +58,7 @@ class StorageVolumeCatalog(private val context: Context) {
     }
 
     fun volumes(): List<StorageVolumeOption> {
-        val options = storageVolumes().mapNotNull { volume ->
+        val detected = storageVolumes().mapNotNull { volume ->
             val directory = directoryOf(volume) ?: return@mapNotNull null
             if (!directory.isDirectory) return@mapNotNull null
             if (!volume.isPrimary && volume.state != Environment.MEDIA_MOUNTED) return@mapNotNull null
@@ -71,22 +71,20 @@ class StorageVolumeCatalog(private val context: Context) {
                 accessible = canListRead(directory),
             )
         }
+        if (detected.isNotEmpty()) return detected
 
-        if (options.isEmpty()) {
-            // 少数 ROM 上 StorageManager 不给卷列表, 至少让内部共享存储还能用
-            val directory = Environment.getExternalStorageDirectory() ?: return emptyList()
-            if (directory.isDirectory) {
-                options += StorageVolumeOption(
-                    id = ID_PRIMARY,
-                    label = directory.name,
-                    path = directory.absolutePath,
-                    removable = false,
-                    accessible = canListRead(directory),
-                )
-            }
-        }
-
-        return options
+        // 少数 ROM 上 StorageManager 不给卷列表, 至少让内部共享存储还能用
+        val directory = Environment.getExternalStorageDirectory() ?: return emptyList()
+        if (!directory.isDirectory) return emptyList()
+        return listOf(
+            StorageVolumeOption(
+                id = ID_PRIMARY,
+                label = directory.name,
+                path = directory.absolutePath,
+                removable = false,
+                accessible = canListRead(directory),
+            )
+        )
     }
 
     /**

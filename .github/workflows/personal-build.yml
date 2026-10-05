@@ -88,6 +88,14 @@ jobs:
           print("written app/google-services.json")
           PY
 
+      # 先跑 workspace 模块的单测: 既验证 WorkspaceMounts 的逻辑, 也验证测试代码本身能编译。
+      # 允许失败, 这样即使测试挂了仍能拿到 APK (失败详情在日志里)。
+      - name: Run workspace unit tests
+        continue-on-error: true
+        run: |
+          chmod +x gradlew
+          ./gradlew :workspace:testDebugUnitTest --no-configuration-cache
+
       # debug 变体不需要签名密钥 (用系统 debug key), 也不触发 crashlytics 上传,
       # 所以这一步没有任何 secret 依赖。
       - name: Build debug APK
