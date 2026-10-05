@@ -1,0 +1,245 @@
+name: Personal build (workspace external storage)
+
+# 个人分支专用: 不提交上游, 只为自己产出一个装了"外部存储挂载"的 APK。
+# 与上游 daily-build.yml 的区别: 上游依赖 3 个 secret (KEY_BASE64 / SIGNING_CONFIG /
+# GOOGLE_SERVICES_JSON), fork 里没有这些, 所以这里改成"现生成/占位"。
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: write   # 发布 Release 需要
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # web 模块的 preBuild 会执行 `pnpm run build`, 必须准备好 Node + pnpm
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web-ui/pnpm-lock.yaml
+
+      - name: Install web-ui dependencies
+        working-directory: web-ui
+        run: pnpm install --frozen-lockfile
+
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+
+      # google-services 插件是无条件 apply 的, 缺 app/google-services.json 会构建失败。
+      # fork 里没有真正的 Firebase 配置, 用结构合法的占位配置顶上 (不含任何真实密钥)。
+      - name: Write firebase placeholder
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+
+          api_key = {"current_key": "AIzaSyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}
+
+          def client(name, suffix):
+              return {
+                  "client_info": {
+                      "mobilesdk_app_id": "1:000000000000:android:" + suffix,
+                      "android_client_info": {"package_name": name},
+                  },
+                  "oauth_client": [],
+                  "api_key": [api_key],
+                  "services": {"appinvite_service": {"other_platform_oauth_client": []}},
+              }
+
+          config = {
+              "project_info": {
+                  "project_number": "000000000000",
+                  "project_id": "rikkahub-personal-build",
+                  "storage_bucket": "rikkahub-personal-build.appspot.com",
+              },
+              "client": [
+                  client("me.rerere.rikkahub", "0000000000000000000000"),
+                  # debug 变体有 applicationIdSuffix=".debug", 每个变体的包名都要在 client 里
+                  client("me.rerere.rikkahub.debug", "0000000000000000000001"),
+              ],
+              "configuration_version": "1",
+          }
+          pathlib.Path("app/google-services.json").write_text(json.dumps(config, indent=2))
+          print("written app/google-services.json")
+          PY
+
+      # debug 变体不需要签名密钥 (用系统 debug key), 也不触发 crashlytics 上传,
+      # 所以这一步没有任何 secret 依赖。
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-configuration-cache --stacktrace
+
+      - name: Report outputs
+        if: always()
+        run: |
+          echo "--- apk outputs ---"
+          find app/build/outputs -name '*.apk' -exec ls -lh {} \; || true
+
+      - name: Publish personal prerelease
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: personal-build
+          name: Personal build (external storage mount)
+          prerelease: true
+          body: |
+            基于 `${{ github.sha }}` 构建的个人分支版本, 含「工作区外部存储挂载」改动。
+
+            这是 **debug 变体**, 包名带 `.debug` 后缀, 会与官方版本**共存**, 不会覆盖也不会动官方 App 的数据。
+            代价是它是一份全新的 App 实例: provider / 助手 / 技能 / 工作区都需要重新配置。
+
+            > 本分支不提交上游 PR, 仅供本人使用。
+          files: |
+            app/build/outputs/apk/debug/*.apk
+
+  # release 变体: 与官方同包名, 但签名不同 (密钥在 CI 里现生成)。
+  # 想装它必须先卸载官方版本 —— 那会清掉 App 数据 (含工作区)。
+  # 允许失败: 即使这里挂了, 上面 job 产出的 debug APK 依然可用。
+  release:
+    needs: debug
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web-ui/pnpm-lock.yaml
+
+      - name: Install web-ui dependencies
+        working-directory: web-ui
+        run: pnpm install --frozen-lockfile
+
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+
+      - name: Write firebase placeholder
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+
+          api_key = {"current_key": "AIzaSyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}
+
+          def client(name, suffix):
+              return {
+                  "client_info": {
+                      "mobilesdk_app_id": "1:000000000000:android:" + suffix,
+                      "android_client_info": {"package_name": name},
+                  },
+                  "oauth_client": [],
+                  "api_key": [api_key],
+                  "services": {"appinvite_service": {"other_platform_oauth_client": []}},
+              }
+
+          config = {
+              "project_info": {
+                  "project_number": "000000000000",
+                  "project_id": "rikkahub-personal-build",
+                  "storage_bucket": "rikkahub-personal-build.appspot.com",
+              },
+              "client": [
+                  client("me.rerere.rikkahub", "0000000000000000000000"),
+                  client("me.rerere.rikkahub.debug", "0000000000000000000001"),
+              ],
+              "configuration_version": "1",
+          }
+          pathlib.Path("app/google-services.json").write_text(json.dumps(config, indent=2))
+          PY
+
+      - name: Generate signing key and local.properties
+        run: |
+          # 现生成一个自用密钥: 与官方签名不同, 因此不能覆盖安装官方版本
+          keytool -genkeypair -v \
+            -keystore app/app.key \
+            -storetype PKCS12 \
+            -alias rikkahub-personal \
+            -keyalg RSA -keysize 4096 -validity 10000 \
+            -storepass android -keypass android \
+            -dname "CN=RikkaHub Personal, OU=Personal, O=Personal, L=Unknown, ST=Unknown, C=CN"
+          # app/build.gradle.kts 的 signingsConfigs.release 会读 rootProject 的 local.properties,
+          # 并把 storeFile 相对 app 模块解析
+          cat > local.properties <<'PROPS'
+          storeFile=app.key
+          storePassword=android
+          keyAlias=rikkahub-personal
+          keyPassword=android
+          PROPS
+
+      - name: Build release APKs
+        run: |
+          chmod +x gradlew
+          # crashlytics 的 mapping 上传需要真实 Firebase 凭据, 个人构建里没有, 直接排除
+          ./gradlew :app:assembleRelease \
+            -x uploadCrashlyticsMappingFileRelease \
+            -x uploadCrashlyticsSymbolFileRelease \
+            --no-configuration-cache --stacktrace
+
+      - name: Report outputs
+        if: always()
+        run: |
+          echo "--- apk outputs ---"
+          find app/build/outputs -name '*.apk' -exec ls -lh {} \; || true
+
+      - name: Publish release APKs
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: personal-build
+          name: Personal build (external storage mount)
+          prerelease: true
+          body: |
+            基于 `${{ github.sha }}` 构建的个人分支版本, 含「工作区外部存储挂载」改动。
+
+            **release 变体**: 与官方同包名 `me.rerere.rikkahub`, 但用了 CI 现生成的签名密钥,
+            与官方签名不同 —— 安装前必须先卸载官方版本, **那会清掉 App 数据(含工作区)**。
+            只想试功能的话请用 debug 变体。
+          files: |
+            app/build/outputs/apk/release/*.apk

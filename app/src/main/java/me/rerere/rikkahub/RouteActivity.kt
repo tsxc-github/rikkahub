@@ -121,6 +121,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingSearchDetailPage
 import me.rerere.rikkahub.ui.pages.setting.SettingSearchPage
 import me.rerere.rikkahub.ui.pages.setting.SettingSpeechPage
 import me.rerere.rikkahub.ui.pages.setting.SettingWebPage
+import me.rerere.rikkahub.ui.pages.setting.SettingWorkspaceStoragePage
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerPage
 import me.rerere.rikkahub.ui.pages.stats.StatsPage
 import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
@@ -410,6 +411,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingPreferencesPage()
                             }
 
+                            entry<Screen.SettingWorkspaceStorage> {
+                                SettingWorkspaceStoragePage()
+                            }
+
                             entry<Screen.SettingPreferencesTheme> {
                                 SettingPreferencesThemePage()
                             }
@@ -646,6 +651,8 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingPreferences : Screen
+
+    data object SettingWorkspaceStorage : Screen
 
     @Serializable
     data object SettingPreferencesTheme : Screen

@@ -11,12 +11,20 @@ class WorkspaceManager(
     private val baseDir: File,
     private val config: WorkspaceConfig = WorkspaceConfig(),
     private val shellRunner: WorkspaceShellRunner = HostShellRunner(),
-    private val bindMounts: List<WorkspaceBindMount> = emptyList(),
+    private val bindMountsProvider: () -> List<WorkspaceBindMount> = { emptyList() },
 ) {
     private val fileSystem = WorkspaceFileSystem(config)
 
+    /**
+     * 挂载表在使用时求值, 而不是构造时快照一次:
+     * 外置存储会被插拔, 权限会被回收, 用户也可能在设置里改挂载点。
+     */
+    private fun currentBindMounts(): List<WorkspaceBindMount> =
+        WorkspaceMountPoints.filterUsable(bindMountsProvider())
+
     // 按 target 长度降序, 保证 /a/b 优先于 /a 匹配
-    private val sortedBindMounts = bindMounts.sortedByDescending { it.target.trimEnd('/').length }
+    private fun sortedBindMounts(): List<WorkspaceBindMount> =
+        currentBindMounts().sortedByDescending { it.target.trimEnd('/').length }
 
     init {
         baseDir.mkdirs()
@@ -125,7 +133,7 @@ class WorkspaceManager(
         val trimmed = path.trim().trimEnd('/').ifBlank { "/" }
         require(trimmed.startsWith("/")) { "Rootfs path must be absolute: $path" }
 
-        sortedBindMounts.forEach { mount ->
+        sortedBindMounts().forEach { mount ->
             val target = mount.target.trimEnd('/')
             if (trimmed == target) return RootfsLocation(mount.source, "")
             if (trimmed.startsWith("$target/")) {
@@ -215,7 +223,7 @@ class WorkspaceManager(
                 workingDir = workingDir,
                 timeoutMillis = timeoutMillis,
                 stdin = stdin,
-                bindMounts = bindMounts,
+                bindMounts = currentBindMounts(),
                 shellCompatibilityMode = shellCompatibilityMode,
             )
         )

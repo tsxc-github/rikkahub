@@ -55,6 +55,9 @@ class ProotShellRunner(
                 environment()["PROOT_LOADER"] = loader.absolutePath
                 environment()["PROOT_TMP_DIR"] = context.tempDir.absolutePath
                 environment()["TMPDIR"] = context.tempDir.absolutePath
+                // 外部卷可能在 exists() 判定与 exec 之间被拔掉; 让 PRoot 跳过已消失的绑定,
+                // 而不是在启动阶段直接失败
+                environment()["PROOT_IGNORE_MISSING_BINDINGS"] = "1"
             }
             .start()
 
@@ -79,10 +82,10 @@ class ProotShellRunner(
         )
 
         context.bindMounts.forEach { mount ->
-            if (mount.source.exists()) {
-                command += "-b"
-                command += "${mount.source.absolutePath}:${mount.target.trimEnd('/')}"
-            }
+            // 挂载点必须先在 rootfs 内存在, 否则 PRoot 的 -b 会静默失效 (见 WorkspaceMountPoints)
+            if (!WorkspaceMountPoints.prepare(context.linuxDir, mount)) return@forEach
+            command += "-b"
+            command += "${mount.source.absolutePath}:${mount.target.trimEnd('/')}"
         }
 
         WorkspaceManager.KERNEL_FS_MOUNTS.forEach { path ->

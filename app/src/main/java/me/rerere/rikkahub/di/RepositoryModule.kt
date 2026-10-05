@@ -11,6 +11,7 @@ import me.rerere.rikkahub.data.repository.FilesRepository
 import me.rerere.rikkahub.data.repository.GenMediaRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
+import me.rerere.rikkahub.data.workspace.WorkspaceMountRepository
 import me.rerere.workspace.ProotShellRunner
 import me.rerere.workspace.RootfsInstaller
 import me.rerere.workspace.WorkspaceBindMount
@@ -45,31 +46,21 @@ val repositoryModule = module {
 
     single {
         val context: Context = get()
+        val mountRepository: WorkspaceMountRepository = get()
         WorkspaceManager(
             baseDir = File(context.filesDir, "workspaces"),
             shellRunner = ProotShellRunner(
                 nativeLibraryDir = File(context.applicationInfo.nativeLibraryDir),
             ),
-            // 同一份挂载表既用于 PRoot 的 -b 参数, 也用于文件工具的路径解析, 避免两处漂移
-            bindMounts = listOf(
-                WorkspaceBindMount(
-                    source = File(context.filesDir, FileFolders.SKILLS).apply { mkdirs() },
-                    target = "/skills",
-                ),
-                WorkspaceBindMount(
-                    source = File(context.filesDir, FileFolders.BUILTIN_SKILLS).apply { mkdirs() },
-                    target = "/builtin_skills",
-                ),
-                WorkspaceBindMount(
-                    source = File(context.filesDir, FileFolders.TOOL_OUTPUTS).apply { mkdirs() },
-                    target = "/tool_outputs",
-                ),
-                WorkspaceBindMount(
-                    source = File(context.filesDir, FileFolders.UPLOAD).apply { mkdirs() },
-                    target = "/upload",
-                ),
-            ),
+            // 同一份挂载表既用于 PRoot 的 -b 参数, 也用于文件工具的路径解析, 避免两处漂移。
+            // App 自带的挂载点固定不变; 用户配置的外部存储每次启动 PRoot 时重新求值,
+            // 这样插拔 U 盘、回收权限都不需要重启 App。
+            bindMountsProvider = { builtinWorkspaceMounts(context) + mountRepository.resolveMounts() },
         )
+    }
+
+    single {
+        WorkspaceMountRepository(get())
     }
 
     single {
@@ -88,3 +79,22 @@ val repositoryModule = module {
         SkillManager(get(), get())
     }
 }
+
+private fun builtinWorkspaceMounts(context: Context): List<WorkspaceBindMount> = listOf(
+    WorkspaceBindMount(
+        source = File(context.filesDir, FileFolders.SKILLS).apply { mkdirs() },
+        target = "/skills",
+    ),
+    WorkspaceBindMount(
+        source = File(context.filesDir, FileFolders.BUILTIN_SKILLS).apply { mkdirs() },
+        target = "/builtin_skills",
+    ),
+    WorkspaceBindMount(
+        source = File(context.filesDir, FileFolders.TOOL_OUTPUTS).apply { mkdirs() },
+        target = "/tool_outputs",
+    ),
+    WorkspaceBindMount(
+        source = File(context.filesDir, FileFolders.UPLOAD).apply { mkdirs() },
+        target = "/upload",
+    ),
+)
