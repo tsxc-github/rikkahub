@@ -224,11 +224,9 @@ jobs:
       - name: Build release APKs
         run: |
           chmod +x gradlew
-          # crashlytics 的 mapping 上传需要真实 Firebase 凭据, 个人构建里没有, 直接排除
-          ./gradlew :app:assembleRelease \
-            -x uploadCrashlyticsMappingFileRelease \
-            -x uploadCrashlyticsSymbolFileRelease \
-            --no-configuration-cache --stacktrace
+          # 不要用 -x 排除 crashlytics 任务: 这个配置下它们根本没被注册,
+          # 指定不存在的任务会让 Gradle 直接报 TaskSelectionException 而失败。
+          ./gradlew :app:assembleRelease --no-configuration-cache --stacktrace
 
       - name: Report outputs
         if: always()
