@@ -45,6 +45,11 @@ interface WorkspaceBackend {
 
     fun exportAbsoluteFile(path: String, outputStream: OutputStream)
 
+    // region ops-v2
+    fun readAbsoluteChunk(path: String, offset: Long, maxBytes: Int): WorkspaceReadChunk =
+        error("Bounded reads are not supported by this backend")
+    // endregion
+
     /** 按环境内绝对路径写入 UTF-8 文本, 父目录不存在时自动创建; 返回的条目 path 为绝对路径 */
     fun writeAbsoluteText(path: String, text: String, overwrite: Boolean): WorkspaceFileEntry
 

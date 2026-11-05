@@ -10,6 +10,7 @@ import me.rerere.workspace.WorkspaceFileEntry
 import me.rerere.workspace.WorkspaceLayout
 import me.rerere.workspace.WorkspaceStorageArea
 import me.rerere.workspace.shellQuote
+import me.rerere.workspace.readWorkspaceBytes
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -131,6 +132,26 @@ class SshWorkspaceBackend(
             connection.sftp { it.requireFile(file, path).size }
         }
     }
+
+    // region ops-v2
+    override fun readAbsoluteChunk(path: String, offset: Long, maxBytes: Int): me.rerere.workspace.WorkspaceReadChunk {
+        require(offset >= 0 && maxBytes in 1..65536)
+        val file = normalizeAbsolute(path)
+        return pool.use(id, config, retry = false) { connection ->
+            connection.sftp { sftp ->
+                val before = sftp.requireFile(file, path)
+                fun stamp(a: SftpATTRS) = "$file:${a.size}:${a.mTime}"
+                val bytes = sftp.get(file.sftpQuote(), null, offset).use {
+                    it.readWorkspaceBytes(maxBytes)
+                }
+                check(stamp(before) == stamp(sftp.requireFile(file, path))) {
+                    "source_changed: retry from the beginning"
+                }
+                me.rerere.workspace.WorkspaceReadChunk(bytes, before.size, stamp(before))
+            }
+        }
+    }
+    // endregion
 
     override fun exportAbsoluteFile(path: String, outputStream: OutputStream) {
         val file = normalizeAbsolute(path)

@@ -316,6 +316,11 @@ class WorkspaceRepository(
     }
 
     /** 按环境内绝对路径导出文件内容, 本地工作区支持 /workspace、bind mount 与 Rootfs 内部路径 */
+    // region ops-v2
+    suspend fun readAbsoluteChunk(id: String, path: String, offset: Long, maxBytes: Int): me.rerere.workspace.WorkspaceReadChunk =
+        readFromBackend(id) { it.readAbsoluteChunk(path, offset, maxBytes) }
+    // endregion
+
     suspend fun exportAbsoluteFile(
         id: String,
         path: String,
