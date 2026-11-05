@@ -166,7 +166,9 @@ class OpsV2Test {
     @Test fun `storage failure retains original rather than fake reference`() = runBlocking {
         val s = ToolResultStore(tmp.newFolder("too-small"), maxBytes = 10)
         val text = "x".repeat(9000)
-        val output = WorkspaceContextProjector(s).project(listOf(message("big", text)), "chat")
+        // This failure path is for unpaged raw output, not a self-managed file page.
+        val raw = message("big", text).let { m -> m.copy(parts = m.parts.map { (it as UIMessagePart.Tool).copy(toolName = "workspace_shell") }) }
+        val output = WorkspaceContextProjector(s).project(listOf(raw), "chat")
         assertTrue(body(output.single()).startsWith(text))
         assertTrue(body(output.single()).contains("budget degraded"))
     }

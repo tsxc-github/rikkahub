@@ -52,7 +52,7 @@ internal fun createV2ReadTool(original: Tool, workspaceId: String, repo: Workspa
                 if (full) OpsBudget.MARKDOWN else OpsBudget.PAGE,
             ) { pos, count -> repo.readAbsoluteChunk(workspaceId, path, pos, count) }
             listOf(managedText(page.copy(source = path).render(numbered = !full), path, markdown,
-                if (page.next == null) "complete" else "limited"))
+                if (page.next == null) "complete" else "limited", paged = true))
         }
     } },
 )
@@ -104,7 +104,7 @@ internal fun createV2ResultTool(store: ToolResultStore, scope: String, legacy: F
             if (meta != null) store.chunk(scope, ref, pos, count) else v1.readWorkspaceChunk(pos, count)
         } }
         val status = meta?.str("status") ?: "legacy_capture_completeness_unknown"
-        listOf(managedText("capture_status=$status\n" + page.render(numbered = !full),
-            "ref:$ref", markdown, if (page.next == null) status else "limited"))
+        listOf(managedText("capture_status=$status\n" + page.render(numbered = !full, lineKind = "snapshot"),
+            "ref:$ref", markdown, if (page.next == null) status else "limited", paged = true))
     } },
 )

@@ -27,6 +27,9 @@ internal object WorkspaceQueries {
             listOf(op, path, pattern, glob, regex.toString(), ignore.toString(), max.toString(), filesOnly.toString()).joinToString(" ") { it.shellQuote() }
     }
 
+    private fun plainPath(path: String) = path.none { it.isWhitespace() || it.isISOControl() || it in ":\"\\" }
+    private fun displayPath(path: String) = if (plainPath(path)) path else JsonPrimitive(path).toString()
+
     fun render(stdout: String, failed: Boolean, stderr: String): Pair<String, String> {
         val fields = stdout.split('\u0000')
         var index = 0
@@ -38,13 +41,14 @@ internal object WorkspaceQueries {
             when (fields[index++]) {
                 "F" -> {
                     require(index < fields.size) { "Invalid path frame" }
-                    lines += JsonPrimitive(fields[index++]).toString()
+                    lines += displayPath(fields[index++])
                 }
                 "H" -> {
                     require(index + 2 < fields.size) { "Invalid hit frame" }
                     val file = fields[index++]; val number = fields[index++]; val text = fields[index++]
                     require(number.toIntOrNull()?.let { it > 0 } == true) { "Invalid line number" }
-                    lines += "${JsonPrimitive(file)}:$number:$text"
+                    lines += if (plainPath(file)) "$file:$number:$text"
+                        else "path=${JsonPrimitive(file)} line=$number text=${JsonPrimitive(text)}"
                 }
                 "S" -> {
                     require(index + 1 < fields.size) { "Invalid status frame" }

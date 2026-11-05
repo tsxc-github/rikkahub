@@ -50,8 +50,8 @@ internal data class TextPage(
     val source: String, val body: String, val startLine: Int, val continuation: Boolean,
     val fingerprint: String, val next: PageCursor?, val size: Long,
 ) {
-    fun render(numbered: Boolean = true): String = buildString {
-        append("file ").append(JsonPrimitive(source)).append(" | from line ").append(startLine)
+    fun render(numbered: Boolean = true, lineKind: String = "source"): String = buildString {
+        append("file ").append(JsonPrimitive(source)).append(" | ").append(lineKind).append(" line ").append(startLine)
         if (continuation) append(" (continued)")
         append(" | ").append(if (next == null) "complete" else "limited").append('\n')
         if (!numbered) append(body) else {

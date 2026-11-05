@@ -61,4 +61,18 @@ class WorkspaceQueryTest {
         val result = WorkspaceQueries.render("", false, "")
         assertEquals("partial_error", result.second); assertFalse(result.first.contains("no match"))
     }
+    @Test fun `ordinary paths keep conventional grep display`() {
+        val frame = listOf("H", "/workspace/many.txt", "1", "needle", "S", "complete", "", "").joinToString("\u0000")
+        val (text, status) = WorkspaceQueries.render(frame, false, "")
+        assertEquals("complete", status)
+        assertTrue(text.contains("/workspace/many.txt:1:needle"))
+        assertFalse(text.contains("\"/workspace/many.txt\""))
+    }
+    @Test fun `special paths use explicit escaped fields not ambiguous colons`() {
+        val frame = listOf("H", "/workspace/a:b\nweird.txt", "12", "needle", "S", "complete", "", "").joinToString("\u0000")
+        val (text, status) = WorkspaceQueries.render(frame, false, "")
+        assertEquals("complete", status)
+        assertTrue(text.contains("path=\"/workspace/a:b\\nweird.txt\" line=12 text=\"needle\""))
+    }
+
 }

@@ -6,10 +6,10 @@ import kotlinx.serialization.json.*
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 
-internal fun managedText(text: String, source: String, markdown: Boolean = false, status: String = "complete") =
+internal fun managedText(text: String, source: String, markdown: Boolean = false, status: String = "complete", paged: Boolean = false) =
     UIMessagePart.Text(text, buildJsonObject {
         put(OpsBudget.META, buildJsonObject {
-            put("v", 2); put("source", source); put("markdown", markdown); put("status", status)
+            put("v", 2); put("source", source); put("markdown", markdown); put("status", status); put("paged", paged)
         })
     })
 
@@ -26,6 +26,7 @@ internal class WorkspaceContextProjector(private val store: ToolResultStore) {
     private data class Key(val message: Int, val part: Int, val output: Int)
     private data class Entry(
         val key: Key, val callId: String, val source: String, val status: String,
+        val toolName: String, val selfPaged: Boolean,
         val markdown: Boolean, val full: String, var view: String,
         var ref: String? = null, var recoverable: Boolean = true,
     )
@@ -39,7 +40,9 @@ internal class WorkspaceContextProjector(private val store: ToolResultStore) {
                     if (info?.int("v", 0) == 2) {
                         val full = if (part.toolName == "workspace_shell") shellView(output.text) else output.text
                         entries += Entry(Key(m, p, o), part.toolCallId, info.str("source").orEmpty(),
-                            info.str("status") ?: "complete", info.flag("markdown"), full, full)
+                            info.str("status") ?: "complete", part.toolName,
+                            info.flag("paged") || part.toolName in setOf("workspace_read_file", "workspace_result"),
+                            info.flag("markdown"), full, full)
                     }
                 }
             }
@@ -49,19 +52,25 @@ internal class WorkspaceContextProjector(private val store: ToolResultStore) {
             return try { store.put(scope, e.source, e.full, e.status, e.markdown).also { e.ref = it } }
             catch (_: Exception) { e.recoverable = false; null }
         }
-        // Bound generic first screens, but NEVER apply this budget to Markdown.
-        for (e in entries) if (!e.markdown && e.view.utf8Size() > OpsBudget.PAGE) {
+        // A rendered page is atomic: headers/cursor must NEVER be previewed a second time.
+        // Tool identities also support pages from pre-paged-metadata v2 histories.
+        for (e in entries) if (!e.markdown && !e.selfPaged && e.view.utf8Size() > OpsBudget.PAGE) {
             val ref = ensureRef(e)
             if (ref != null) e.view = utf8Prefix(e.full, 4096) + "\n[limited; ref=$ref; use workspace_result]"
             else e.view = e.full + "\n[archive unavailable; original retained; budget degraded]"
         }
         // Deterministic 16 KiB buckets: adding a result doesn't slide the whole prefix each step.
-        val normal = entries.filter { !it.markdown && it.recoverable }
+        // Reserve the latest page before allocating history: restoring a ref must make progress.
+        val priority = entries.lastOrNull { it.selfPaged && !it.markdown && it.recoverable }
+        val latestRestore = entries.lastOrNull { it.toolName == "workspace_result" }
+        val capacity = (OpsBudget.HISTORY.toLong() - (priority?.view?.utf8Size() ?: 0)).coerceAtLeast(0)
+        val normal = entries.filter { !it.markdown && it.recoverable && it.key != priority?.key }
         val total = normal.sumOf { it.view.utf8Size().toLong() }
-        val step = OpsBudget.HISTORY / 2
-        val cutoff = if (total <= OpsBudget.HISTORY) 0L else ((total - OpsBudget.HISTORY) / step + 1) * step
+        val step = (capacity / 2).coerceAtLeast(1)
+        val cutoff = if (total <= capacity) 0L else ((total - capacity) / step + 1) * step
         var prefix = 0L
         val keep = mutableSetOf<Key>()
+        priority?.let { keep += it.key }
         for (e in normal) {
             if (prefix >= cutoff) keep += e.key
             prefix += e.view.utf8Size()
@@ -77,6 +86,8 @@ internal class WorkspaceContextProjector(private val store: ToolResultStore) {
                 else e.view = e.full + "\n[archive unavailable; original retained; budget degraded]"
                 continue
             }
+            // Explicitly requested restore stays a real page, not another receipt/ref.
+            if (e.key == latestRestore?.key) continue
             if (e.full.utf8Size() < 1024) continue
             val hash = sha256((e.source + "\u0000" + e.full).toByteArray(Charsets.UTF_8))
             val anchor = anchors[hash]
