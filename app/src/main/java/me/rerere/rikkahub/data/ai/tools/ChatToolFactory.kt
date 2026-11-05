@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.data.ai.tools
 
+import me.rerere.rikkahub.data.ai.tools.opsv2.*
+import me.rerere.ai.ui.UIMessage
 import android.content.Context
 import android.util.Log
 import kotlinx.serialization.json.jsonObject
@@ -45,11 +47,19 @@ class ChatToolFactory(
     private val skillManager: SkillManager,
     private val workspaceRepository: WorkspaceRepository,
 ) {
+    // region ops-v2
+    private val opsStore by lazy { ToolResultStore(File(context.filesDir, FileFolders.TOOL_OUTPUTS + "/ops-v2")) }
+    private val opsProjector by lazy { WorkspaceContextProjector(opsStore) }
+    suspend fun projectWorkspaceContext(messages: List<UIMessage>, conversationId: Uuid): List<UIMessage> =
+        opsProjector.project(messages, conversationId.toString())
+    // endregion
+
     suspend fun createTools(
         settings: Settings,
         assistant: Assistant,
         model: Model,
         workspaceCwd: String? = null,
+        conversationId: Uuid? = null,
     ): List<Tool> {
         val workspaceTools = createWorkspaceToolsIfReady(assistant.workspaceId?.toString(), workspaceCwd)
         val tools = buildList {
@@ -64,6 +74,9 @@ class ChatToolFactory(
                 addAll(createConversationTools(conversationRepository, assistant.id))
             }
             addAll(workspaceTools)
+            // region ops-v2
+            add(createV2ResultTool(opsStore, conversationId?.toString() ?: "assistant:${assistant.id}", File(context.filesDir, FileFolders.TOOL_OUTPUTS)))
+            // endregion
             if (assistant.enabledSkills.isNotEmpty()) {
                 addAll(
                     createSkillTools(
@@ -97,7 +110,16 @@ class ChatToolFactory(
         // 文件放在本机, 只有本地 Rootfs 挂载了 /tool_outputs, 远程工作区同样读不到
         val canReadToolOutputs = workspaceTools.isNotEmpty() &&
             assistant.workspaceId?.let { workspaceRepository.getById(it.toString()) }?.capabilities()?.rootfs == true
-        return if (canReadToolOutputs) tools.map(::withOutputTruncation) else tools
+        // region ops-v2: Markdown and result pages must bypass the upstream truncator.
+        return tools.map { tool ->
+            when {
+                tool.name == "workspace_result" -> tool
+                tool.name.startsWith("workspace_") -> manageWorkspaceTool(tool)
+                canReadToolOutputs -> withOutputTruncation(tool)
+                else -> tool
+            }
+        }
+        // endregion
     }
 
     private fun withOutputTruncation(tool: Tool): Tool {

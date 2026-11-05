@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.data.ai.tools
 
+import me.rerere.rikkahub.data.ai.tools.opsv2.createV2ReadTool
+import me.rerere.rikkahub.data.ai.tools.opsv2.createV2QueryTools
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -26,6 +28,8 @@ private const val MAX_READ_FILE_BYTES = 8L * 1024 * 1024
 
 val WorkspaceToolDefaultApprovals: Map<String, Boolean> = mapOf(
     "workspace_read_file" to false,
+    "workspace_grep" to false,
+    "workspace_glob" to false,
     "workspace_write_file" to false,
     "workspace_edit_file" to false,
     "workspace_shell" to true,
@@ -51,7 +55,10 @@ suspend fun createWorkspaceTools(
     val shellCwd = cwd?.let(layout::relativeToWorkspace)
 
     return buildList {
-        add(createReadFileTool(workspaceId, layout, ::needsApproval, workspaceRepository))
+        // region ops-v2
+        add(createV2ReadTool(createReadFileTool(workspaceId, layout, ::needsApproval, workspaceRepository), workspaceId, workspaceRepository))
+        addAll(createV2QueryTools(workspaceId, workspaceRepository, layout.workspaceDir, ::needsApproval))
+        // endregion
         if (workspace.capabilities().fileWriteTools) {
             add(createWriteFileTool(workspaceId, layout, ::needsApproval, workspaceRepository))
             add(createEditFileTool(workspaceId, layout, ::needsApproval, workspaceRepository))

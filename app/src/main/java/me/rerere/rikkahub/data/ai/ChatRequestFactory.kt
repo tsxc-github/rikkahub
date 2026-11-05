@@ -115,6 +115,7 @@ class ChatRequestFactory(
                 assistant = assistant,
                 model = model,
                 workspaceCwd = conversation.workspaceCwd,
+                conversationId = conversation.id,
             ),
         )
     }
@@ -253,7 +254,9 @@ class ChatRequestFactory(
             },
             sessionId = turn.conversationId.toString(),
         )
-        return StepRequest(requestMessages, params)
+        // region ops-v2: use the FINAL post-limitContext/post-transform message projection.
+        return StepRequest(chatToolFactory.projectWorkspaceContext(requestMessages, turn.conversationId), params)
+        // endregion
     }
 }
 
