@@ -292,5 +292,6 @@ private class AndroidRunningSsh(private val handle: WorkspaceBackgroundCommand, 
         withTimeout(8_000) { exited.await() }
         requirePortFree(port)
         waiter.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+        Unit
     }
 }
