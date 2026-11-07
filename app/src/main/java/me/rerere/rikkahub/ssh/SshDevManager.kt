@@ -10,6 +10,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -39,6 +43,9 @@ class SshDevManager(context: Context, repository: WorkspaceRepository, workspace
     private val settingsFile = File(directory, "config.json")
     private val mutableConfig = MutableStateFlow<SshDevConfig?>(null)
     val config: StateFlow<SshDevConfig?> = mutableConfig
+    private val networks = SshLanNetworks(context, scope)
+    val lanAddresses: StateFlow<List<SshLanAddress>> = networks.addresses
+    fun refreshLanAddresses(): Job = scope.launch { networks.refresh() }
     private val runtime = AndroidSshRuntime(directory, repository, workspaceManager)
     private val controller = SshDevController(runtime, scope)
     private val mutableDiagnostics = MutableStateFlow("")
@@ -51,7 +58,8 @@ class SshDevManager(context: Context, repository: WorkspaceRepository, workspace
             runCatching {
                 val json = JSONObject(settingsFile.readText())
                 val keys = json.getJSONArray("publicKeys")
-                SshDevConfig(json.getString("workspaceId"), json.getInt("port"), (0 until keys.length()).map { keys.getString(it) }).validated()
+                SshDevConfig(json.getString("workspaceId"), json.getInt("port"), (0 until keys.length()).map { keys.getString(it) },
+                    SshListenMode.valueOf(json.optString("listenMode", "LOOPBACK")), json.optString("bindAddress", "127.0.0.1"), json.optString("bindInterface", "")).validated()
             }.onSuccess { mutableConfig.value = it }
                 .onFailure { controller.reportServiceFailure("保存的 SSH 配置无效，请重新填写并保存") }
         }
@@ -72,11 +80,32 @@ class SshDevManager(context: Context, repository: WorkspaceRepository, workspace
         }
     }
 
+    init {
+        scope.launch {
+            initialized.await()
+            while (currentCoroutineContext().isActive) {
+                state.first { it.listenMode == SshListenMode.LAN && it.phase in setOf(SshDevPhase.STARTING, SshDevPhase.RUNNING) }
+                while (state.value.listenMode == SshListenMode.LAN && state.value.phase in setOf(SshDevPhase.STARTING, SshDevPhase.RUNNING)) {
+                    networks.refresh()
+                    val active = state.value
+                    if (networks.addresses.value.none { it.interfaceName == active.bindInterface && it.address == active.bindAddress }) {
+                        controller.stop("所选 Wi-Fi / 热点地址已消失，SSH 已停止；请重新选择地址后手动启动")
+                        break
+                    }
+                    delay(2_000)
+                }
+            }
+        }
+    }
+
     suspend fun save(config: SshDevConfig) = withContext(Dispatchers.IO) {
         initialized.await()
         check(state.value.phase !in setOf(SshDevPhase.STARTING, SshDevPhase.RUNNING, SshDevPhase.STOPPING) && !state.value.ownsProcess) { "请先停止 SSH 再修改配置" }
         val valid = config.validated()
+        networks.refresh()
+        check(lanAddressAvailable(valid, networks.addresses.value)) { "所选局域网地址已失效，请开启 Wi-Fi 或热点并刷新后重新选择" }
         val json = JSONObject().put("workspaceId", valid.workspaceId).put("port", valid.port).put("publicKeys", JSONArray(valid.publicKeys))
+            .put("listenMode", valid.listenMode.name).put("bindAddress", valid.bindAddress).put("bindInterface", valid.bindInterface)
         atomicPrivateWrite(settingsFile, json.toString())
         mutableConfig.value = valid
     }
@@ -159,7 +188,9 @@ private class AndroidSshRuntime(
             }
         }
         check(!live) { "检测到上次遗留 SSH 进程，请强制停止此测试 App 后重试" }
-        requirePortFree(data.getInt("port"))
+        val oldAddress = data.optString("bindAddress", "127.0.0.1")
+        // A removed interface cannot be rebound; never fall back to wildcard or a different network.
+        if (addressIsAssigned(oldAddress)) requirePortFree(data.getInt("port"), oldAddress)
         check(lease.delete()) { "无法清理旧 SSH 运行记录" }
     }
 
@@ -167,7 +198,8 @@ private class AndroidSshRuntime(
         val item = requireNotNull(repository.getById(config.workspaceId)) { "工作区不存在" }
         check(item.type == "LOCAL" && !item.isSsh()) { "仅支持手机本地工作区" }
         check(item.shellStatus == WorkspaceShellStatus.READY.name && manager.hasRootfs(item.root)) { "请先安装 Rootfs 并等待 READY" }
-        requirePortFree(config.port)
+        check(lanAddressAvailable(config, discoverSshLanAddresses())) { "所选 Wi-Fi / 热点 IPv4 已失效，请刷新并重新选择" }
+        requirePortFree(config.port, config.bindAddress)
         val linux = manager.linuxDir(item.root)
         val dir = File(linux, SSH_PRIVATE_DIR.removePrefix("/"))
         check(!Files.isSymbolicLink(dir.toPath())) { "SSH 配置目录不能是符号链接" }
@@ -197,7 +229,7 @@ private class AndroidSshRuntime(
         // No Include: distro service defaults/password/PAM settings must not leak into this server.
         val text = """
             Port ${config.port}
-            ListenAddress 127.0.0.1
+            ListenAddress ${config.bindAddress}
             HostKey $SSH_PRIVATE_DIR/host
             PidFile $SSH_PRIVATE_DIR/sshd.pid
             PermitRootLogin prohibit-password
@@ -228,11 +260,13 @@ private class AndroidSshRuntime(
     override suspend fun launch(config: SshDevConfig, prepared: PreparedSsh): RunningSsh {
         // Called NonCancellable by the controller. Assign and return ownership before any cancellation.
         val item = requireNotNull(workspace)
-        atomicPrivateWrite(lease, JSONObject().put("root", item.root).put("task", prepared.token).put("port", config.port).toString())
+        check(lanAddressAvailable(config, discoverSshLanAddresses())) { "启动前所选 Wi-Fi / 热点地址已消失" }
+        atomicPrivateWrite(lease, JSONObject().put("root", item.root).put("task", prepared.token).put("port", config.port)
+            .put("bindAddress", config.bindAddress).put("bindInterface", config.bindInterface).toString())
         val handle = manager.startBackgroundCommand(root = item.root, command = "exec /bin/sh -c 'exec \"\$(command -v sshd)\" -D -e -f $SSH_PRIVATE_DIR/sshd_config'",
             id = prepared.token, cwd = "", shellCompatibilityMode = item.shellCompatibilityMode)
         lastHandle = handle
-        return AndroidRunningSsh(handle, File(manager.linuxDir(item.root), handle.logPath.removePrefix("/")), config.port)
+        return AndroidRunningSsh(handle, File(manager.linuxDir(item.root), handle.logPath.removePrefix("/")), config.port, config.bindAddress)
     }
 
     override suspend fun clearLease() {
@@ -240,12 +274,22 @@ private class AndroidSshRuntime(
     }
 }
 
-private fun requirePortFree(port: Int) {
-    try { ServerSocket(port, 1, InetAddress.getByName("127.0.0.1")).close() }
-    catch (_: Exception) { error("回环端口 $port 被占用；若上次异常退出，请先强制停止测试 App") }
+private fun numericSshAddress(address: String): InetAddress {
+    require(address == "127.0.0.1" || isPrivateLanIpv4(address)) { "不允许通配、公网或主机名监听" }
+    return InetAddress.getByAddress(address.split('.').map { it.toInt().toByte() }.toByteArray())
 }
 
-private class AndroidRunningSsh(private val handle: WorkspaceBackgroundCommand, private val log: File, private val port: Int) : RunningSsh {
+private fun addressIsAssigned(address: String): Boolean {
+    val numeric = numericSshAddress(address)
+    return address == "127.0.0.1" || java.net.NetworkInterface.getByInetAddress(numeric) != null
+}
+
+private fun requirePortFree(port: Int, address: String) {
+    try { ServerSocket(port, 1, numericSshAddress(address)).close() }
+    catch (_: Exception) { error("$address:$port 不可绑定或被占用；请检查所选网络地址，异常退出时先强制停止测试 App") }
+}
+
+private class AndroidRunningSsh(private val handle: WorkspaceBackgroundCommand, private val log: File, private val port: Int, private val address: String) : RunningSsh {
     private val waiter = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val exited = waiter.async { handle.waitFor() }
     override val alive: Boolean get() = !exited.isCompleted
@@ -262,7 +306,7 @@ private class AndroidRunningSsh(private val handle: WorkspaceBackgroundCommand, 
                             log.inputStream().use { input ->
                                 val bytes = ByteArray(8192)
                                 val count = input.read(bytes)
-                                count > 0 && String(bytes, 0, count).contains("Server listening on 127.0.0.1 port $port.")
+                                count > 0 && String(bytes, 0, count).contains("Server listening on $address port $port.")
                             }
                         }.getOrDefault(false)
                         if (ready && alive && signaled.compareAndSet(false, true)) continuation.resume(Unit)
@@ -277,7 +321,7 @@ private class AndroidRunningSsh(private val handle: WorkspaceBackgroundCommand, 
         try {
             Socket().use { socket ->
                 socket.soTimeout = 2_000
-                socket.connect(InetSocketAddress("127.0.0.1", port), 1_000)
+                socket.connect(InetSocketAddress(numericSshAddress(address), port), 1_000)
                 val banner = ByteArray(8)
                 java.io.DataInputStream(socket.getInputStream()).readFully(banner)
                 check(String(banner) == "SSH-2.0-" && alive) { "SSH 握手失败" }
@@ -290,7 +334,7 @@ private class AndroidRunningSsh(private val handle: WorkspaceBackgroundCommand, 
         pendingObserver?.stopWatching(); pendingObserver = null
         if (alive) handle.kill()
         withTimeout(8_000) { exited.await() }
-        requirePortFree(port)
+        if (addressIsAssigned(address)) requirePortFree(port, address)
         waiter.coroutineContext[kotlinx.coroutines.Job]?.cancel()
         Unit
     }

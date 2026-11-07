@@ -126,6 +126,21 @@ class SshDevControllerTest {
         assertEquals(SshDevPhase.ERROR, c.state.value.phase)
         r.failRecovery = false; c.stop(); assertEquals(SshDevPhase.STOPPED, c.state.value.phase)
     }
+    @Test fun lanStateUsesTheSelectedAddress() = scenario { c, _ ->
+        c.start(config().copy(listenMode = SshListenMode.LAN, bindAddress = "192.168.43.1", bindInterface = "ap0"))
+        assertEquals(SshDevPhase.RUNNING, c.state.value.phase)
+        assertEquals(SshListenMode.LAN, c.state.value.listenMode)
+        assertEquals("192.168.43.1", c.state.value.bindAddress)
+        assertTrue(c.state.value.message.contains("192.168.43.1"))
+    }
+    @Test fun switchingFromLanToLoopbackStopsTheOldOwner() = scenario { c, r ->
+        c.start(config().copy(listenMode = SshListenMode.LAN, bindAddress = "192.168.43.1", bindInterface = "ap0"))
+        val old = r.servers.single()
+        c.start(config())
+        assertFalse(old.alive)
+        assertEquals("127.0.0.1", c.state.value.bindAddress)
+        assertEquals(2, r.launched)
+    }
     @Test fun serviceStartRefusalDoesNotLeaveListener() = scenario { c, r ->
         c.start(config()); c.reportServiceFailure("FGS denied")
         assertEquals(SshDevPhase.ERROR, c.state.value.phase); assertFalse(r.servers.single().alive)

@@ -57,7 +57,8 @@ internal class SshDevController(private val runtime: SshDevRuntime, private val 
             }
             if (running?.alive == true && activeConfig == config && state.value.phase == SshDevPhase.RUNNING) return@withLock
             if (!stopLocked()) return@withLock
-            mutableState.value = SshDevState(phase = SshDevPhase.STARTING, workspaceId = config.workspaceId, port = config.port, message = "正在检查环境与配置")
+            mutableState.value = SshDevState(phase = SshDevPhase.STARTING, workspaceId = config.workspaceId, port = config.port, message = "正在检查环境与配置",
+                listenMode = config.listenMode, bindAddress = config.bindAddress, bindInterface = config.bindInterface)
             try {
                 val prepared = withTimeout(45_000) {
                     runtime.recover()
@@ -70,7 +71,8 @@ internal class SshDevController(private val runtime: SshDevRuntime, private val 
                 withTimeout(10_000) { handle.awaitReady() }
                 check(!stopRequested.get()) { "启动已取消" }
                 mutableState.value = state.value.copy(phase = SshDevPhase.RUNNING, workspaceName = prepared.name,
-                    fingerprint = prepared.fingerprint, message = "仅回环 127.0.0.1；通过 USB ADB 转发连接", startedAt = System.currentTimeMillis(), ownsProcess = true)
+                    fingerprint = prepared.fingerprint, message = if (config.listenMode == SshListenMode.LOOPBACK) "仅回环 127.0.0.1；通过 USB ADB 转发连接" else "局域网 ${config.bindAddress} · ${config.bindInterface}；电脑可直连，网络变化将停止",
+                    startedAt = System.currentTimeMillis(), ownsProcess = true)
                 scope.launch {
                     val result = runCatching { handle.awaitExit() }
                     mutex.withLock {

@@ -143,7 +143,7 @@ class SshDevService : Service() {
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_rikkahub)
             .setContentTitle("SSH 开发连接 · ${state.phase}")
-            .setContentText("${state.workspaceName} · 127.0.0.1:${state.port}")
+            .setContentText("${state.workspaceName} · ${state.bindAddress}:${state.port}")
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
