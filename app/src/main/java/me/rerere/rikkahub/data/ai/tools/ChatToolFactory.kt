@@ -19,6 +19,7 @@ import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.data.repository.memoryId
 import me.rerere.rikkahub.data.skills.SkillManager
+import me.rerere.rikkahub.service.BackgroundShellManager
 import me.rerere.workspace.WorkspaceShellStatus
 import java.io.File
 import kotlin.uuid.Uuid
@@ -46,6 +47,7 @@ class ChatToolFactory(
     private val mcpManager: McpManager,
     private val skillManager: SkillManager,
     private val workspaceRepository: WorkspaceRepository,
+    private val backgroundShellManager: BackgroundShellManager,
 ) {
     // region ops-v2
     private val opsStore by lazy { ToolResultStore(File(context.filesDir, FileFolders.TOOL_OUTPUTS + "/ops-v2")) }
@@ -58,10 +60,11 @@ class ChatToolFactory(
         settings: Settings,
         assistant: Assistant,
         model: Model,
+        conversationId: Uuid,
         workspaceCwd: String? = null,
-        conversationId: Uuid? = null,
     ): List<Tool> {
-        val workspaceTools = createWorkspaceToolsIfReady(assistant.workspaceId?.toString(), workspaceCwd)
+        val workspaceTools =
+            createWorkspaceToolsIfReady(assistant.workspaceId?.toString(), workspaceCwd, conversationId)
         val tools = buildList {
             if (assistant.enableMemory) {
                 addAll(buildMemoryTools(memoryRepository, assistant.memoryId))
@@ -75,7 +78,7 @@ class ChatToolFactory(
             }
             addAll(workspaceTools)
             // region ops-v2
-            add(createV2ResultTool(opsStore, conversationId?.toString() ?: "assistant:${assistant.id}", File(context.filesDir, FileFolders.TOOL_OUTPUTS)))
+            add(createV2ResultTool(opsStore, conversationId.toString(), File(context.filesDir, FileFolders.TOOL_OUTPUTS)))
             // endregion
             if (assistant.enabledSkills.isNotEmpty()) {
                 addAll(
@@ -153,7 +156,11 @@ class ChatToolFactory(
         ) + output.filter { it !is UIMessagePart.Text }
     }
 
-    private suspend fun createWorkspaceToolsIfReady(workspaceId: String?, cwd: String?): List<Tool> {
+    private suspend fun createWorkspaceToolsIfReady(
+        workspaceId: String?,
+        cwd: String?,
+        conversationId: Uuid,
+    ): List<Tool> {
         if (workspaceId.isNullOrBlank()) return emptyList()
         val workspace = workspaceRepository.getById(workspaceId) ?: return emptyList()
         if (workspace.shellStatus != WorkspaceShellStatus.READY.name) {
@@ -163,6 +170,6 @@ class ChatToolFactory(
             )
             return emptyList()
         }
-        return createWorkspaceTools(workspaceId, workspaceRepository, cwd)
+        return createWorkspaceTools(workspaceId, workspaceRepository, cwd, conversationId, backgroundShellManager)
     }
 }

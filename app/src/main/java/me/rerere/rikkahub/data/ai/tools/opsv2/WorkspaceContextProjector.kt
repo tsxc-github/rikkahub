@@ -34,11 +34,11 @@ internal class WorkspaceContextProjector(private val store: ToolResultStore) {
     suspend fun project(messages: List<UIMessage>, scope: String): List<UIMessage> = withContext(Dispatchers.IO) {
         val entries = mutableListOf<Entry>()
         messages.forEachIndexed { m, message -> message.parts.forEachIndexed { p, part ->
-            if (part is UIMessagePart.Tool && part.toolName in setOf("workspace_read_file", "workspace_result", "workspace_grep", "workspace_glob", "workspace_shell", "workspace_write_file", "workspace_edit_file")) part.output.forEachIndexed { o, output ->
+            if (part is UIMessagePart.Tool && part.toolName in setOf("workspace_read_file", "workspace_result", "workspace_grep", "workspace_glob", "workspace_shell", "workspace_shell_output", "workspace_shell_kill", "workspace_write_file", "workspace_edit_file")) part.output.forEachIndexed { o, output ->
                 if (output is UIMessagePart.Text) {
                     val info = output.metadata?.get(OpsBudget.META) as? JsonObject
                     if (info?.int("v", 0) == 2) {
-                        val full = if (part.toolName == "workspace_shell") shellView(output.text) else output.text
+                        val full = if (part.toolName in setOf("workspace_shell", "workspace_shell_output", "workspace_shell_kill")) shellView(output.text) else output.text
                         entries += Entry(Key(m, p, o), part.toolCallId, info.str("source").orEmpty(),
                             info.str("status") ?: "complete", part.toolName,
                             info.flag("paged") || part.toolName in setOf("workspace_read_file", "workspace_result"),
@@ -107,9 +107,20 @@ internal class WorkspaceContextProjector(private val store: ToolResultStore) {
         }) }
     }
 
-    /** This adapter is only called for the known native workspace_shell tool, never arbitrary JSON. */
+    /** Only known native shell tools use this adapter, never arbitrary JSON. */
     private fun shellView(text: String): String {
         val obj = runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return text
+        if (obj["taskId"] is JsonPrimitive && obj["status"] is JsonPrimitive) return buildString {
+            append("taskId=").append(obj.str("taskId"))
+            append(" status=").append(obj.str("status"))
+            obj.str("exitCode")?.let { append(" exitCode=").append(it) }
+            append(" logPath=").append(obj.str("logPath"))
+            val skipped = obj.str("skippedBytes")?.toLongOrNull() ?: 0L
+            if (skipped > 0L) append(" source_truncated=true skippedBytes=").append(skipped)
+                .append(" (ref contains captured output only)")
+            obj.str("note")?.let { append('\n').append(it) }
+            obj.str("output")?.let { append("\n[output]\n").append(it) }
+        }
         if (obj["exitCode"] !is JsonPrimitive || obj["stdout"] !is JsonPrimitive || obj["stderr"] !is JsonPrimitive) return text
         return buildString {
             append("exitCode=").append(obj.str("exitCode"))

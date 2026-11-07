@@ -29,6 +29,49 @@ class OpsPagingIntegrationTest {
     }
     private fun oldHistory() = (1..14).map { i -> message("old$i", markPage("old$i\n" + "o".repeat(5500), "/old$i.txt")) }
 
+    private suspend fun backgroundPart(name: String, payload: String): UIMessagePart.Text {
+        val store = ToolResultStore(tmp.newFolder())
+        val tool = createV2ResultTool(store, "chat", tmp.newFolder()).copy(
+            name = name, execute = { listOf(UIMessagePart.Text(payload)) },
+        )
+        return manageWorkspaceTool(tool).execute(buildJsonObject {}).single() as UIMessagePart.Text
+    }
+
+    @Test fun `background start without exit code is running not error`() = runBlocking {
+        val part = backgroundPart("workspace_shell", """{"taskId":"job1","status":"running","logPath":"/logs/job1"}""")
+        assertEquals("running", part.metadata!![OpsBudget.META]!!.jsonObject.str("status"))
+        val visible = text(WorkspaceContextProjector(ToolResultStore(tmp.newFolder())).project(listOf(message("bg", part, "workspace_shell")), "chat").single())
+        assertTrue(visible.contains("job1"))
+        assertTrue(visible.contains("/logs/job1"))
+    }
+
+    @Test fun `large background output enters the same bounded projection`() = runBlocking {
+        val payload = buildJsonObject { put("taskId", "job2"); put("status", "running"); put("logPath", "/logs/job2"); put("output", "x".repeat(20000)) }.toString()
+        val part = backgroundPart("workspace_shell_output", payload)
+        val visible = text(WorkspaceContextProjector(ToolResultStore(tmp.newFolder())).project(listOf(message("bgout", part, "workspace_shell_output")), "chat").single())
+        assertTrue(visible.utf8Size() < payload.utf8Size())
+        assertTrue(visible.contains("ref="))
+        assertTrue(visible.contains("job2"))
+        assertTrue(visible.contains("status=running"))
+        assertTrue(visible.contains("/logs/job2"))
+    }
+
+    @Test fun `skipped background bytes remain explicitly incomplete`() = runBlocking {
+        val part = backgroundPart("workspace_shell_output", """{"taskId":"job3","status":"exited","exitCode":0,"logPath":"/logs/job3","output":"tail","skippedBytes":123}""")
+        assertEquals("source_truncated", part.metadata!![OpsBudget.META]!!.jsonObject.str("status"))
+        val visible = text(WorkspaceContextProjector(ToolResultStore(tmp.newFolder())).project(listOf(message("skip", part, "workspace_shell_output")), "chat").single())
+        assertTrue(visible.contains("source_truncated=true"))
+        assertTrue(visible.contains("skippedBytes=123"))
+        assertTrue(visible.contains("tail"))
+    }
+
+    @Test fun `background kill and nonzero exit retain correct status`() = runBlocking {
+        val killed = backgroundPart("workspace_shell_kill", """{"taskId":"job4","status":"killed","exitCode":143,"logPath":"/logs/job4"}""")
+        assertEquals("killed", killed.metadata!![OpsBudget.META]!!.jsonObject.str("status"))
+        val failed = backgroundPart("workspace_shell_output", """{"taskId":"job5","status":"exited","exitCode":2,"logPath":"/logs/job5","output":"failed"}""")
+        assertEquals("error", failed.metadata!![OpsBudget.META]!!.jsonObject.str("status"))
+    }
+
     @Test fun `twenty KiB line round trips through rendered final requests`() = runBlocking {
         val original = "long line 文🚀 ".repeat(1600)
         val bytes = original.toByteArray()

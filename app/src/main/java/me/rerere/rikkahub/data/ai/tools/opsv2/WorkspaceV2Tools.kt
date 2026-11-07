@@ -66,11 +66,14 @@ internal fun manageWorkspaceTool(tool: Tool): Tool {
             if (part !is UIMessagePart.Text || part.metadata?.containsKey(OpsBudget.META) == true) part else {
                 val json = args as? JsonObject
                 val source = json?.str("path") ?: "${tool.name}:${sha256(args.toString().toByteArray()).take(16)}:$index"
-                val shell = if (tool.name == "workspace_shell") runCatching { Json.parseToJsonElement(part.text).jsonObject }.getOrNull() else null
+                val shell = if (tool.name in setOf("workspace_shell", "workspace_shell_output", "workspace_shell_kill"))
+                    runCatching { Json.parseToJsonElement(part.text).jsonObject }.getOrNull() else null
                 val status = when {
                     shell?.flag("timedOut") == true -> "timeout"
-                    shell?.flag("truncated") == true -> "source_truncated"
-                    shell != null && shell.int("exitCode", -1) != 0 -> "error"
+                    shell?.flag("truncated") == true || (shell?.str("skippedBytes")?.toLongOrNull() ?: 0L) > 0L -> "source_truncated"
+                    shell?.str("status") == "running" -> "running"
+                    shell?.str("status") == "killed" -> "killed"
+                    shell != null && shell["exitCode"] != null && shell.int("exitCode", 0) != 0 -> "error"
                     else -> "complete"
                 }
                 val marked = managedText(part.text, source, tool.name == "workspace_read_file" && source.isMarkdown(), status)
