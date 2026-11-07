@@ -15,6 +15,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -33,12 +34,17 @@ class SshDevService : Service() {
     private var observing = false
     private var seenActive = false
     private var shutdownRequested = false
+    private var startOperation: Job? = null
+    private var requestEpoch = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
+                val epoch = ++requestEpoch
+                shutdownRequested = false
+                seenActive = false
                 if (BuildConfig.IS_PLAY_STORE) {
                     stopSelf()
                     return START_NOT_STICKY
@@ -60,8 +66,10 @@ class SshDevService : Service() {
                         startForeground(ID, notification)
                     }
                     val job = manager.start()
+                    startOperation = job
                     job.invokeOnCompletion {
                         scope.launch {
+                            if (epoch != requestEpoch) return@launch
                             val state = manager.state.value
                             if (state.phase !in setOf(
                                     SshDevPhase.STARTING,
@@ -80,6 +88,7 @@ class SshDevService : Service() {
                 }
             }
             ACTION_STOP -> {
+                ++requestEpoch
                 manager.stop().invokeOnCompletion {
                     scope.launch {
                         if (!manager.state.value.ownsProcess) {
@@ -105,7 +114,9 @@ class SshDevService : Service() {
                     setOf(SshDevPhase.STARTING, SshDevPhase.RUNNING, SshDevPhase.STOPPING)) {
                     seenActive = true
                 }
-                if ((seenActive || state.phase == SshDevPhase.ERROR) &&
+                // Ignore the previous terminal state while a new start performs asynchronous preflight.
+                // Completion of this specific request handles preflight failures, even without STARTING.
+                if (seenActive &&
                     state.phase in setOf(SshDevPhase.STOPPED, SshDevPhase.ERROR) && !state.ownsProcess) {
                     finishService()
                 } else if (state.phase != SshDevPhase.STOPPED) {
@@ -150,7 +161,10 @@ class SshDevService : Service() {
         super.onTaskRemoved(rootIntent)
     }
     override fun onDestroy() {
-        if (!shutdownRequested) manager.stop("SSH 服务被系统关闭")
+        if (!shutdownRequested || startOperation?.isActive == true ||
+            manager.state.value.ownsProcess) {
+            manager.stop("SSH 服务被系统关闭")
+        }
         scope.cancel()
         super.onDestroy()
     }
