@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- GitHub development build only. No new FGS declaration is shipped in the Play flavor. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <application>
+        <service
+            android:name=".service.SshDevService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-initiated interactive SSH development server for a local PRoot workspace, accessed through loopback and USB ADB forwarding; visible ongoing notification with Stop action; never boot-started or automatically restored." />
+        </service>
+    </application>
+</manifest>

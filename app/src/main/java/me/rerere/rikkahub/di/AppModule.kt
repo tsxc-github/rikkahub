@@ -174,4 +174,5 @@ val appModule = module {
             filesManager = get()
         )
     }
+    single { me.rerere.rikkahub.ssh.SshDevManager(get(), get(), get()) }
 }

@@ -273,6 +273,19 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                 }
             }
 
+            if (!me.rerere.rikkahub.BuildConfig.IS_PLAY_STORE) {
+                item("sshDev") {
+                    CardGroup {
+                        item(
+                            onClick = { navController.navigate(Screen.SettingSsh) },
+                            leadingContent = { CardGroupIcon(HugeIcons.ServerStack01) },
+                            supportingContent = { Text("通过 USB 连接本地工作区 · 默认关闭") },
+                            headlineContent = { Text("SSH 开发连接") },
+                        )
+                    }
+                }
+            }
+
             item("dataSettings") {
                 val storageState by produceState(-1 to 0L) {
                     value = filesManager.countChatFiles()
