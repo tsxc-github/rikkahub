@@ -259,7 +259,7 @@ class WorkspaceManager(
     /** Extra mounts are scoped to this invocation. They may not shadow tracking/system/shared mounts. */
     private fun commandMounts(linux: File, extra: List<WorkspaceBindMount>): List<WorkspaceBindMount> {
         fun overlaps(a: String, b: String) = a == b || a.startsWith("$b/") || b.startsWith("$a/")
-        val protected =
+        val protectedTargets =
             listOf("/", ROOTFS_WORKSPACE_DIR, "/tmp") + KERNEL_FS_MOUNTS + bindMounts.map { it.target.trimEnd('/') }
         val result = extra.map { mount ->
             val target = mount.target.trimEnd('/')
@@ -269,7 +269,7 @@ class WorkspaceManager(
                     target.split('/').none { it == "." || it == ".." }
             ) { "Invalid command bind target" }
             require(
-                protected.none { it != "/" && overlaps(target, it) }
+                protectedTargets.none { it != "/" && overlaps(target, it) }
             ) { "Command bind would shadow a protected mount: $target" }
             require(mount.source.isDirectory) { "Command bind source must be an existing directory" }
             val guest = File(linux.canonicalFile, target.removePrefix("/"))
