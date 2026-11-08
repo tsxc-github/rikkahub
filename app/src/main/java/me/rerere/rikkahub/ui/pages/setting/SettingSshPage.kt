@@ -64,6 +64,8 @@ fun SettingSshPage(
     val state by manager.state.collectAsStateWithLifecycle()
     val saved by manager.config.collectAsStateWithLifecycle()
     val diagnostics by manager.diagnostics.collectAsStateWithLifecycle()
+    val ipcDiagnostics by manager.ipcDiagnostics.collectAsStateWithLifecycle()
+    val ipcProbing by manager.ipcProbing.collectAsStateWithLifecycle()
     val lanAddresses by manager.lanAddresses.collectAsStateWithLifecycle()
     var listenMode by remember { mutableStateOf(SshListenMode.LOOPBACK) }
     var bindAddress by remember { mutableStateOf("") }
@@ -184,6 +186,9 @@ fun SettingSshPage(
             CardGroup {
                 item(headlineContent = { Text("状态：${state.phase}") }, supportingContent = { Text(state.message) })
             }
+            Text("SSH 会话使用独立的 /vscode-tmp 短 IPC 映射；普通工作区 /tmp、工作文件和原有 PID 日志不变。VS Code 是否可用需先看下方探针，不保证所有扩展兼容。", style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(enabled = selected.isNotBlank() && !saving && !ipcProbing, onClick = { manager.probeIpc(selected) }) { Text(if (ipcProbing) "检查 IPC 中…" else "检查 VS Code IPC（临时探针）") }
+            if (ipcDiagnostics.isNotBlank()) SelectionContainer { Text(ipcDiagnostics, style = MaterialTheme.typography.bodySmall) }
             OutlinedButton(onClick = { manager.refreshDiagnostics() }) { Text("刷新本次运行日志尾部") }
             if (diagnostics.isNotBlank()) SelectionContainer { Text(diagnostics, style = MaterialTheme.typography.bodySmall) }
             if (state.fingerprint.isNotBlank()) {

@@ -25,6 +25,7 @@ import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.workspace.WorkspaceShellStatus
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.WorkspaceBackgroundCommand
+import me.rerere.workspace.WorkspaceBindMount
 import me.rerere.workspace.WorkspaceManager
 import org.json.JSONArray
 import org.json.JSONObject
@@ -46,7 +47,22 @@ class SshDevManager(context: Context, repository: WorkspaceRepository, workspace
     private val networks = SshLanNetworks(context, scope)
     val lanAddresses: StateFlow<List<SshLanAddress>> = networks.addresses
     fun refreshLanAddresses(): Job = scope.launch { networks.refresh() }
-    private val runtime = AndroidSshRuntime(directory, repository, workspaceManager)
+    private val runtime = AndroidSshRuntime(directory, repository, workspaceManager, SshIpcStorage(context.cacheDir, File(directory, "ipc-owners")))
+    private val mutableIpcDiagnostics = MutableStateFlow("")
+    val ipcDiagnostics: StateFlow<String> = mutableIpcDiagnostics
+    private val mutableIpcProbing = MutableStateFlow(false)
+    val ipcProbing: StateFlow<Boolean> = mutableIpcProbing
+    private var ipcProbeJob: Job? = null
+    @Synchronized
+    fun probeIpc(workspaceId: String): Job {
+        ipcProbeJob?.takeIf { it.isActive }?.let { return it }
+        return scope.launch {
+            mutableIpcProbing.value = true
+            try { mutableIpcDiagnostics.value = runtime.probeIpc(workspaceId) }
+            catch (e: Exception) { mutableIpcDiagnostics.value = "IPC 检查失败：${e.message}" }
+            finally { mutableIpcProbing.value = false }
+        }.also { ipcProbeJob = it }
+    }
     private val controller = SshDevController(runtime, scope)
     private val mutableDiagnostics = MutableStateFlow("")
     val diagnostics: StateFlow<String> = mutableDiagnostics
@@ -156,10 +172,41 @@ private class AndroidSshRuntime(
     directory: File,
     private val repository: WorkspaceRepository,
     private val manager: WorkspaceManager,
+    private val ipcStorage: SshIpcStorage,
 ) : SshDevRuntime {
     private val lease = File(directory, "active.json")
     private var workspace: WorkspaceEntity? = null
     private var lastHandle: WorkspaceBackgroundCommand? = null
+    private var preparedIpc: SshIpcLocation? = null
+
+    private fun ipcMount(root: String): Pair<SshIpcLocation, WorkspaceBindMount> {
+        val location = ipcStorage.allocate(root)
+        val guest = File(manager.linuxDir(root), SSH_IPC_GUEST.removePrefix("/"))
+        check(!Files.isSymbolicLink(guest.toPath())) { "IPC guest 挂载点不能是符号链接" }
+        if (guest.exists()) check(guest.isDirectory && guest.list()?.isEmpty() == true) { "保留目录 $SSH_IPC_GUEST 非空，不会覆盖或隐藏用户文件" }
+        guest.mkdirs()
+        check(guest.isDirectory) { "无法创建 IPC guest 挂载点" }
+        return location to WorkspaceBindMount(location.hostDirectory, SSH_IPC_GUEST, writable = true)
+    }
+    suspend fun probeIpc(workspaceId: String): String = withContext(Dispatchers.IO) {
+        check(!BuildConfig.IS_PLAY_STORE) { "Play 构建未开放开发连接" }
+        val item = requireNotNull(repository.getById(workspaceId)) { "请先选择工作区" }
+        check(item.type == "LOCAL" && item.shellStatus == WorkspaceShellStatus.READY.name && manager.hasRootfs(item.root)) { "仅支持 READY 的本地 Rootfs" }
+        val (ipc, mount) = ipcMount(item.root)
+        val script = """
+            set -eu
+            NODE=''
+            for n in /root/.vscode-server/cli/servers/Stable-*/server/node; do
+              if [ -x "${'$'}n" ] && "${'$'}n" --version >/dev/null 2>&1; then NODE="${'$'}n"; break; fi
+            done
+            if [ -z "${'$'}NODE" ]; then echo 'NO_WORKING_CLI_NODE: 请先用 VS Code CLI 链路完成 Server 下载并安装 libstdc++ libgcc'; exit 127; fi
+            export TMPDIR=$SSH_IPC_GUEST
+            "${'$'}NODE" - <<'JS'
+        """.trimIndent() + "\n" + ipcNodeProbeProgram() + "\nJS\n"
+        val result = manager.executeCommand(item.root, script, timeoutMillis = 25_000, shellCompatibilityMode = item.shellCompatibilityMode, extraBindMounts = listOf(mount))
+        "IPC_CANDIDATE host=${ipc.hostDirectory.absolutePath}\nHOST_PATH_BYTES=${ipc.hostDirectory.absolutePath.toByteArray().size}; guest=$SSH_IPC_GUEST\nEXIT=${result.exitCode}; timeout=${result.timedOut}\n" + result.stdout.takeLast(10000) + result.stderr.takeLast(1500)
+    }
+
     fun logTail(): String = runCatching {
         val handle = lastHandle ?: return "尚无本次运行日志"
         val size = handle.outputSize()
@@ -200,6 +247,7 @@ private class AndroidSshRuntime(
         check(item.shellStatus == WorkspaceShellStatus.READY.name && manager.hasRootfs(item.root)) { "请先安装 Rootfs 并等待 READY" }
         check(lanAddressAvailable(config, discoverSshLanAddresses())) { "所选 Wi-Fi / 热点 IPv4 已失效，请刷新并重新选择" }
         requirePortFree(config.port, config.bindAddress)
+        preparedIpc = ipcMount(item.root).first
         val linux = manager.linuxDir(item.root)
         val dir = File(linux, SSH_PRIVATE_DIR.removePrefix("/"))
         check(!Files.isSymbolicLink(dir.toPath())) { "SSH 配置目录不能是符号链接" }
@@ -248,6 +296,7 @@ private class AndroidSshRuntime(
             PermitTunnel no
             Subsystem sftp internal-sftp
             LogLevel VERBOSE
+            SetEnv TMPDIR=$SSH_IPC_GUEST
         """.trimIndent() + "\n"
         atomicPrivateWrite(File(dir, "sshd_config"), text)
         command("sshd -t -f $SSH_PRIVATE_DIR/sshd_config")
@@ -263,8 +312,10 @@ private class AndroidSshRuntime(
         check(lanAddressAvailable(config, discoverSshLanAddresses())) { "启动前所选 Wi-Fi / 热点地址已消失" }
         atomicPrivateWrite(lease, JSONObject().put("root", item.root).put("task", prepared.token).put("port", config.port)
             .put("bindAddress", config.bindAddress).put("bindInterface", config.bindInterface).toString())
-        val handle = manager.startBackgroundCommand(root = item.root, command = "exec /bin/sh -c 'exec \"\$(command -v sshd)\" -D -e -f $SSH_PRIVATE_DIR/sshd_config'",
-            id = prepared.token, cwd = "", shellCompatibilityMode = item.shellCompatibilityMode)
+        val ipc = requireNotNull(preparedIpc) { "IPC 路径尚未准备" }
+        val handle = manager.startBackgroundCommand(root = item.root, command = "export TMPDIR=$SSH_IPC_GUEST; exec /bin/sh -c 'exec \"\$(command -v sshd)\" -D -e -f $SSH_PRIVATE_DIR/sshd_config'",
+            id = prepared.token, cwd = "", shellCompatibilityMode = item.shellCompatibilityMode,
+            extraBindMounts = listOf(WorkspaceBindMount(ipc.hostDirectory, SSH_IPC_GUEST, writable = true)))
         lastHandle = handle
         return AndroidRunningSsh(handle, File(manager.linuxDir(item.root), handle.logPath.removePrefix("/")), config.port, config.bindAddress)
     }

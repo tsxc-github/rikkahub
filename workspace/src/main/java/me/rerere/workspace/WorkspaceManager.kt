@@ -208,8 +208,11 @@ class WorkspaceManager(
         timeoutMillis: Long = DEFAULT_COMMAND_TIMEOUT_MS,
         stdin: ByteArray? = null,
         shellCompatibilityMode: Boolean = false,
+        extraBindMounts: List<WorkspaceBindMount> = emptyList(),
     ): WorkspaceCommandResult =
-        shellRunner.execute(shellContext(root, command, cwd, timeoutMillis, stdin, shellCompatibilityMode))
+        shellRunner.execute(
+            shellContext(root, command, cwd, timeoutMillis, stdin, shellCompatibilityMode, extraBindMounts)
+        )
 
     fun startBackgroundCommand(
         root: String,
@@ -217,8 +220,12 @@ class WorkspaceManager(
         cwd: String,
         id: String,
         shellCompatibilityMode: Boolean = false,
+        extraBindMounts: List<WorkspaceBindMount> = emptyList(),
     ): WorkspaceBackgroundCommand =
-        shellRunner.startBackground(shellContext(root, command, cwd, 0, null, shellCompatibilityMode), id)
+        shellRunner.startBackground(
+            shellContext(root, command, cwd, 0, null, shellCompatibilityMode, extraBindMounts),
+            id
+        )
 
     private fun shellContext(
         root: String,
@@ -227,6 +234,7 @@ class WorkspaceManager(
         timeoutMillis: Long,
         stdin: ByteArray?,
         shellCompatibilityMode: Boolean,
+        extraBindMounts: List<WorkspaceBindMount> = emptyList(),
     ): WorkspaceShellContext {
         require(command.isNotBlank()) { "Command is required" }
         val workingDir = fileSystem.resolve(filesDir(root), cwd)
@@ -243,9 +251,37 @@ class WorkspaceManager(
             workingDir = workingDir,
             timeoutMillis = timeoutMillis,
             stdin = stdin,
-            bindMounts = bindMounts,
+            bindMounts = commandMounts(linuxDir(root), extraBindMounts),
             shellCompatibilityMode = shellCompatibilityMode,
         )
+    }
+
+    /** Extra mounts are scoped to this invocation. They may not shadow tracking/system/shared mounts. */
+    private fun commandMounts(linux: File, extra: List<WorkspaceBindMount>): List<WorkspaceBindMount> {
+        fun overlaps(a: String, b: String) = a == b || a.startsWith("$b/") || b.startsWith("$a/")
+        val protected =
+            listOf("/", ROOTFS_WORKSPACE_DIR, "/tmp") + KERNEL_FS_MOUNTS + bindMounts.map { it.target.trimEnd('/') }
+        val result = extra.map { mount ->
+            val target = mount.target.trimEnd('/')
+            require(
+                target.isNotEmpty() && target.startsWith('/') && !target.contains("//") &&
+                    target.none { it.isISOControl() } &&
+                    target.split('/').none { it == "." || it == ".." }
+            ) { "Invalid command bind target" }
+            require(
+                protected.none { it != "/" && overlaps(target, it) }
+            ) { "Command bind would shadow a protected mount: $target" }
+            require(mount.source.isDirectory) { "Command bind source must be an existing directory" }
+            val guest = File(linux.canonicalFile, target.removePrefix("/"))
+            require(
+                guest.isDirectory && guest.canonicalFile == guest.absoluteFile
+            ) { "Create a real guest mount point before binding: $target" }
+            mount.copy(target = target)
+        }
+        result.forEachIndexed { index, mount ->
+            require(result.take(index).none { overlaps(mount.target, it.target) }) { "Overlapping command binds" }
+        }
+        return bindMounts + result
     }
 
     /** 交互式终端启动前的准备: 补齐目录, 并按当前网络刷新 Rootfs 的 DNS 等配置 */
