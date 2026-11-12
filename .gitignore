@@ -11,3 +11,24 @@ local.properties
 .cursor
 .history
 .kotlin
+# Custom builds: private configuration and generated deliverables never belong in Git.
+.local-build/
+**/google-services.json
+*.jks
+*.keystore
+*.pem
+*.p12
+*.pfx
+*.apk
+*.aab
+
+# Custom builds: private configuration and generated deliverables never belong in Git.
+.local-build/
+**/google-services.json
+*.jks
+*.keystore
+*.pem
+*.p12
+*.pfx
+*.apk
+*.aab

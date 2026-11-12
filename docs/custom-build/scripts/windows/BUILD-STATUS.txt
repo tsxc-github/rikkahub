@@ -1,0 +1,29 @@
+SSH P0 Windows bundle / v3.1.2
+SOURCE_COMMIT=7f784084 (ssh-p0)
+BASE_COMMIT=3adc2271 (3.1.2 + ops-v2)
+
+Main APK + instrumentation: PASS (assemble exit 0; 2m45s)
+JVM app: 545 tests, 0 failures/errors/skips
+JVM workspace: 56 tests, 0 failures/errors/skips
+Unit task exit: 0
+Lint exit: 1 (existing main UI source issues; these files are unchanged by SSH P0)
+Spotless exit: 1 (inherited WorkspaceRepository.kt / WorkspaceReadChunk.kt formatting)
+Overall driver exit: 1; NOT an all-green validation.
+
+Main package: me.rerere.rikkahub.sshprobe
+Main versionName/versionCode: 3.1.2 / 195
+Instrumentation package: me.rerere.rikkahub.sshprobe.test
+Instrumentation target: me.rerere.rikkahub.sshprobe
+Runner: androidx.test.runner.AndroidJUnitRunner
+Both APKs: apksigner verify PASS, same original Android debug certificate
+Certificate SHA256: 7fb5c6c9015483f1c11518069f4817924d4c07ca5c937744a93d18831a2c9630
+
+Main APK SHA256: c448cdd4dc686e349e3873127684b2c1f16c47a4c9628b347c9781b2cd67233a
+Instrumentation SHA256: 52c65f99b1403f09e87a4e2d2222f78e22ba77c50c9ffe19314bb111906dcee9
+
+Windows script execution: NOT YET VERIFIED ON WINDOWS
+Android instrumentation execution: NOT YET VERIFIED ON DEVICE
+Real computer SSH/SFTP/PTY/forwarding: PENDING USER TEST
+VS Code Remote-SSH: NOT TESTED / VS Code Server is not installed by this bundle
+
+Only public test artifacts are included. No private keys, local.properties, Rootfs or user workspace data.

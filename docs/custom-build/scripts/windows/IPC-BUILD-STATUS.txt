@@ -1,0 +1,27 @@
+SSH short-IPC candidate test package
+HEAD=198983c032cfccd866a62889c46a37bf01e83b20
+BASE_LAN=96b94e15
+APP=me.rerere.rikkahub.sshprobe / 3.1.2 / code195 / arm64
+
+assemble(main + androidTest)=PASS
+app JVM=618 passed, 0 failures/errors/skips
+workspace JVM=65 passed, 0 failures/errors/skips
+TOTAL JVM=683 passed
+Actual Kotlin core=73 passed (formatted 0.248s)
+Production-generated Node listen+echo-connect program=4 passed on coding Linux, NOT phone PRoot
+pwsh diagnostic transport/AST/Node syntax=5 passed, NOT Windows phone execution
+
+lint=FAIL, inherited 67 errors / 348 warnings / 1 hint, no new IPC/manager/settings report entries
+spotless=FAIL, inherited WorkspaceRepository.kt / WorkspaceReadChunk.kt only
+Overall driver exit=1, NOT all-green. No blanket lint baseline added.
+
+Signatures=verified with original debug certificate
+Certificate SHA256=7fb5c6c9015483f1c11518069f4817924d4c07ca5c937744a93d18831a2c9630
+Main SHA256=4865d9b93e92e1590ca06730ac93d76bd016445752d1b53077259ad307b46fee
+Test SHA256=b155622a2a49a7bf00a30872532e7017b00d8da5a26dd0d95fc81b8f9d6d4959
+Manifest/instrumentation target=verified
+DEX=short IPC storage/probe/scoped extra bind/SetEnv TMPDIR + LAN + ops query verified
+
+New /vscode-tmp phone listen/connect=NOT YET DEVICE-VERIFIED
+VS Code remote window and extensions=NOT VERIFIED
+No private keys, Rootfs, local.properties or user workspace data included.

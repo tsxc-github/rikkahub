@@ -1,3 +1,22 @@
+# Custom build / 自用改造：AI 必读
+
+本 fork 有 `ops-v2`（日用工具改造）与 `ssh-p1`（隔离 SSH/LAN/IPC 实验）两条线。**先读 [docs/custom-build/README.md](docs/custom-build/README.md)、[STATUS.md](docs/custom-build/STATUS.md)、[BUILD.md](docs/custom-build/BUILD.md)、[AI-NOTES.md](docs/custom-build/AI-NOTES.md)**，再按下面上游规范写代码。
+
+- 先核对分支/HEAD/脏文件/包名；目录 `rikkahub-ssh-p0` 实际可能在 ssh-p1。不要顺手把 SSH 合入日用 ops。
+- 先落盘规划，再修改；不能改宿主/CT 内存、swap、CPU、磁盘、网络/防火墙，除非用户明确批准。不要自动安装 App、卸载、清数据或重装 Rootfs。
+- 测试编排优先 pwsh；新的 Run-Build.ps1 默认 Inspect，不提交源码。历史脚本部分会自动格式化/git commit，先读 scripts/README.md，禁止盲跑。
+- `.ops` 与 `.sshprobe` debug 包名必须隔离；release 与官方同包名，签名密钥不入库，签名不同不能靠自动卸载解决。
+- versionName 跟上游同号，保留官方更新提醒；不要下载安装官方 APK 覆盖改造。
+- 保留 Markdown 512KiB/历史豁免、精确 cursor、不可变 ref、有界 grep/glob、后台 shell 状态和源截断报告，不用 shell cat/opspipe 绕过有界工具。
+- SSH 默认回环或显式选定 LAN 地址；无 UPnP/公网映射/0.0.0.0。短 IPC 映射只限 SSH，不能改全局 /tmp。
+- **P2/VS Code 尚未验收通过**。683 JVM、APK 静态核验、coding Linux Node 成功都不能替代手机新路径与 VS Code 远程窗口证据；lint/格式继承失败不能写“全绿”。
+- 禁止提交或回显私钥、*.jks/*.keystore、local.properties、真实 google-services.json、授权/cookie、Rootfs、手机工作区数据或原始日志。先检查 diff；不 force push、不改 master/默认分支。
+- 定位靠具体目录，读/搜索源码优先有界原生 read/grep/glob/result；禁止递归扫描整个 /workspace。长构建后台执行，阶段退出码与未验证项写入文档。
+
+以下保留上游指南。若其通用示例与上面的 fork 安全/流程约束冲突，以本节为准。
+
+---
+
 # Repository Guidelines
 
 ## Project Overview
