@@ -1,0 +1,30 @@
+SSH LAN / phone hotspot isolated test package
+HEAD=96b94e159d5f1fcb379e598ce0d1049ecfb3b018
+BASE_P1=fe1a683c
+APP=me.rerere.rikkahub.sshprobe / 3.1.2 / code195 / arm64-v8a
+
+assemble=PASS (main + androidTest)
+app JVM=598 passed, 0 failed/errors/skipped
+workspace JVM=56 passed, 0 failed/errors/skipped
+TOTAL JVM=654 passed
+Actual Kotlin core=53 passed (formatted source 0.179s)
+pwsh syntax and host policy=17 passed (3 parsers + 14 cases)
+
+lint=FAIL, inherited 67 errors / 348 warnings / 1 hint; no SshLan/SshDev/SettingSsh report entries
+spotless=FAIL, inherited WorkspaceRepository.kt / WorkspaceReadChunk.kt only
+Overall build driver exit=1. NOT all-green. No blanket lint baseline/suppression added.
+
+Both APK signatures verified with original debug certificate:
+7fb5c6c9015483f1c11518069f4817924d4c07ca5c937744a93d18831a2c9630
+Main SHA256=8d057e8de78859fe96b6225e0a4f52364f48f0e8fca4e04a68f9d5ed48ffdb25
+Test SHA256=52c65f99b1403f09e87a4e2d2222f78e22ba77c50c9ffe19314bb111906dcee9
+Manifest=non-exported service + specialUse rationale + ACCESS_NETWORK_STATE checked
+Instrumentation target=.sshprobe checked
+DEX=LAN discovery/listen mode/address/interface/settings/service checked
+ops-v2/query.sh=present
+
+Phone Wi-Fi / hotspot / stop-on-address-loss=NOT YET DEVICE-VERIFIED
+Windows OpenSSH direct LAN connection=NOT YET VERIFIED
+VS Code Remote-SSH / Server=NOT TESTED
+
+No private keys, Rootfs, local.properties or user workspace data included.
