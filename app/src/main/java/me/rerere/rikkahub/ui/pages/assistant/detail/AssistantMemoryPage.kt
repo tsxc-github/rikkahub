@@ -65,6 +65,7 @@ import me.rerere.rikkahub.ui.components.ui.PagerTabs
 import me.rerere.rikkahub.ui.components.ui.switchItem
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.pages.memory.resultText
+import me.rerere.rikkahub.ui.pages.memory.MemoryExchangeButton
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.ui.components.RikkaConfirmDialog
 import org.koin.androidx.compose.koinViewModel
@@ -109,6 +110,7 @@ fun AssistantMemoryPage(id: String) {
                     BackButton()
                 },
                 actions = {
+                    MemoryExchangeButton(vm.memoryId)
                     if (MemoryTab.entries[pagerState.currentPage] == MemoryTab.FILES) {
                         IconButton(onClick = { navController.navigate(Screen.MemoryFile(vm.memoryId, null)) }) {
                             Icon(HugeIcons.Add01, contentDescription = stringResource(R.string.add))

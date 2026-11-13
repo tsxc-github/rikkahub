@@ -146,6 +146,27 @@ internal class SshConnection private constructor(
         }
     }
 
+    fun exchangeJson(command: String, request: ByteArray, timeoutMillis: Long): String {
+        val channel = openChannel { session.openChannel("exec") as ChannelExec }
+        channel.setCommand(command)
+        val stdout = RpcCollector(channel.inputStream, 128 * 1024 * 1024)
+        val stderr = RpcCollector(channel.extInputStream, 16 * 1024)
+        try {
+            channel.connectExec()
+            val writer = StreamWriter(channel.outputStream, request)
+            val deadline = System.nanoTime() + timeoutMillis * 1_000_000
+            while (!channel.isClosed && System.nanoTime() < deadline) Thread.sleep(EXEC_POLL_INTERVAL_MS)
+            if (!channel.isClosed) throw IOException("Memory SSH RPC timed out")
+            writer.join(1_000)
+            val output = stdout.finish(5_000)
+            stderr.finish(1_000)
+            if (channel.exitStatus != 0) throw IOException("Memory SSH helper exited with ${channel.exitStatus}")
+            return output
+        } finally {
+            channel.disconnect()
+        }
+    }
+
     /** 在带 PTY 的 exec channel 里运行 [command], [onClose] 在 shell 关闭时调用 */
     fun openShell(command: String, columns: Int, rows: Int, onClose: () -> Unit): SshShell {
         val channel = openChannel { session.openChannel("exec") as ChannelExec }

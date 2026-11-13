@@ -27,7 +27,7 @@ $app = Get-Content -LiteralPath $buildFile -Raw
 $version = [regex]::Match($app, 'versionName\s*=\s*"([^"]+)"').Groups[1].Value
 $code = [regex]::Match($app, 'versionCode\s*=\s*(\d+)').Groups[1].Value
 $suffix = [regex]::Match($app, 'applicationIdSuffix\s*=\s*"([^"]+)"').Groups[1].Value
-if ($suffix -notin @('.ops','.sshprobe')) { throw "Unexpected debug suffix '$suffix'; review package policy" }
+if ($suffix -notin @('.ops','.sshprobe','.memoryprobe')) { throw "Unexpected debug suffix '$suffix'; review package policy" }
 Write-Output "repo=$RepoRoot branch=$branch head=$head"
 Write-Output "version=$version code=$code debugPackage=me.rerere.rikkahub$suffix"
 if ($dirty) { Write-Warning "Working tree is dirty; no automatic stash/reset will occur:`n$dirty" }

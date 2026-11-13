@@ -36,6 +36,12 @@ val repositoryModule = module {
     }
 
     single {
+        me.rerere.rikkahub.data.sync.memory.MemorySyncManager(
+            get(), get(), get(), get<me.rerere.rikkahub.AppScope>(),
+        )
+    }
+
+    single {
         TranslationHistoryRepository(get())
     }
 

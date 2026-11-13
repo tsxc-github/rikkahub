@@ -36,6 +36,7 @@ import me.rerere.workspace.ssh.SshJumpHostConfig
 import me.rerere.workspace.ssh.SshProbeResult
 import me.rerere.workspace.ssh.SshShell
 import me.rerere.workspace.ssh.SshWorkspaceBackend
+import me.rerere.workspace.ssh.exchangeJson
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
@@ -352,6 +353,32 @@ class WorkspaceRepository(
         // runInterruptible 让协程取消转化为线程中断，从而打断阻塞的 Process.waitFor 并杀掉进程
         return runInterruptible(Dispatchers.IO) {
             backendOf(workspace).executeCommand(command, cwd, timeoutMillis, stdin)
+        }
+    }
+
+    /** Memory RPC has its own strict byte budget; shell truncation is not a valid JSON response. */
+    suspend fun memorySyncRpc(id: String, remoteRoot: String, requestJson: String): String {
+        val workspace = requireNotNull(dao.getById(id)) { "SSH workspace no longer exists" }
+        require(workspace.isSsh()) { "Memory sync requires an SSH workspace" }
+        val settings = requireNotNull(workspace.sshSettings()) { "SSH configuration is missing" }
+        val config = settings.toConnectionConfig()
+        val quotedRoot = "'" + remoteRoot.replace("'", "'\"'\"'") + "'"
+        val command = "python3 \"\$HOME/.local/share/rikkahub-memory-sync/memory_sync.py\" rpc --root $quotedRoot"
+        return try {
+            runInterruptible(Dispatchers.IO) {
+                sshPool.exchangeJson(workspace.id, config, command, (requestJson + "\n").toByteArray(Charsets.UTF_8))
+            }
+        } catch (e: Exception) {
+            currentCoroutineContext().ensureActive()
+            val rejected = generateSequence<Throwable>(e) { it.cause }.any {
+                it is me.rerere.workspace.ssh.SshUnknownHostKeyException ||
+                    it is me.rerere.workspace.ssh.SshHostKeyChangedException ||
+                    it.message?.startsWith("Auth fail") == true
+            }
+            if (rejected) throw me.rerere.rikkahub.data.sync.memory.MemorySyncException(
+                "connection_rejected", "SSH 身份验证或主机公钥校验失败，请在工作区设置中处理",
+            )
+            throw e
         }
     }
 

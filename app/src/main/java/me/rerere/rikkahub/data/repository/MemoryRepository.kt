@@ -2,11 +2,10 @@ package me.rerere.rikkahub.data.repository
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import me.rerere.rikkahub.data.db.dao.MemoryDAO
 import me.rerere.rikkahub.data.db.entity.MemoryFileEntity
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.MemoryDocumentSnapshot
 import me.rerere.rikkahub.data.model.MemoryFile
 
 sealed interface MemoryWriteResult {
@@ -22,17 +21,14 @@ sealed interface MemoryWriteResult {
 /**
  * 记忆库：每个助手（或全局）一组 Markdown 文件。
  *
- * 写操作都带 ifVersion 做乐观锁：传 [NEW_FILE_VERSION] 表示新建，传版本号表示基于该版本修改，
- * 传 null 则不校验（用户在界面里直接编辑）。
+ * 模型工具保留内容 hash 乐观锁；同步与界面编辑使用单调 generation，防止删除重建 ABA。
+ * 所有读取、版本校验、内容和 revision 更新均在同一个 Room 事务中完成。
  */
 class MemoryRepository(private val memoryDAO: MemoryDAO) {
     companion object {
         const val GLOBAL_MEMORY_ID = "__global__"
         const val NEW_FILE_VERSION = "new"
     }
-
-    // 读取、校验版本、写入必须一起完成，否则两个写入方会互相覆盖
-    private val writeLock = Mutex()
 
     fun getFilesFlow(assistantId: String): Flow<List<MemoryFile>> =
         memoryDAO.getFilesOfAssistantFlow(assistantId).map { entities -> entities.map { it.toMemoryFile() } }
@@ -43,6 +39,41 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
     suspend fun getFile(assistantId: String, path: String): MemoryFile? {
         val normalized = MemoryFile.normalizePath(path) ?: return null
         return memoryDAO.getFile(assistantId, normalized)?.toMemoryFile()
+    }
+
+    fun snapshotsFlow(memoryId: String): Flow<List<MemoryDocumentSnapshot>> = memoryDAO.snapshotsFlow(memoryId)
+
+    fun getFilesWithGenerationFlow(memoryId: String): Flow<List<Pair<MemoryFile, Long>>> =
+        memoryDAO.getFilesWithGenerationFlow(memoryId).map { rows ->
+            rows.map { it.file.toMemoryFile() to it.generation }
+        }
+
+    suspend fun snapshots(memoryId: String): List<MemoryDocumentSnapshot> = memoryDAO.snapshots(memoryId)
+
+    suspend fun snapshot(memoryId: String, path: String): MemoryDocumentSnapshot {
+        val normalized = requireNotNull(MemoryFile.normalizePath(path)) { "Invalid memory path." }
+        return memoryDAO.snapshot(memoryId, normalized) ?: MemoryDocumentSnapshot(normalized, null, 0)
+    }
+
+    suspend fun writeAtGeneration(
+        memoryId: String,
+        path: String,
+        content: String?,
+        expectedGeneration: Long,
+    ): MemoryWriteResult = memoryDAO.writeTransaction {
+        val normalized = MemoryFile.normalizePath(path) ?: return@writeTransaction invalidPath(path)
+        if (expectedGeneration < 0) return@writeTransaction MemoryWriteResult.Rejected("Invalid generation.")
+        val current = memoryDAO.getFile(memoryId, normalized)
+        val generation = memoryDAO.getRevision(memoryId, normalized)?.generation ?: 0L
+        if (generation != expectedGeneration) {
+            return@writeTransaction MemoryWriteResult.Conflict(current?.toMemoryFile())
+        }
+        if (content == null) {
+            memoryDAO.deleteFile(memoryId, normalized)
+            MemoryWriteResult.Success(null)
+        } else {
+            persist(memoryId, normalized, content, current?.toMemoryFile())
+        }
     }
 
     /** 新建或整体覆盖 */
@@ -89,11 +120,11 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
         assistantId: String,
         path: String,
         ifVersion: String? = null,
-    ): MemoryWriteResult = writeLock.withLock {
-        val normalized = MemoryFile.normalizePath(path) ?: return invalidPath(path)
+    ): MemoryWriteResult = memoryDAO.writeTransaction {
+        val normalized = MemoryFile.normalizePath(path) ?: return@writeTransaction invalidPath(path)
         val current = memoryDAO.getFile(assistantId, normalized)?.toMemoryFile()
         if (current == null || (ifVersion != null && ifVersion != current.version)) {
-            return MemoryWriteResult.Conflict(current)
+            return@writeTransaction MemoryWriteResult.Conflict(current)
         }
         memoryDAO.deleteFile(assistantId, normalized)
         MemoryWriteResult.Success(null)
@@ -104,9 +135,7 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
     }
 
     suspend fun copyFiles(fromAssistantId: String, toAssistantId: String) {
-        val files = memoryDAO.getFilesOfAssistant(fromAssistantId)
-        if (files.isEmpty()) return
-        memoryDAO.upsertFiles(files.map { it.copy(assistantId = toAssistantId) })
+        memoryDAO.copyFiles(fromAssistantId, toAssistantId)
     }
 
     private sealed interface Edit {
@@ -120,36 +149,42 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
         ifVersion: String?,
         allowCreate: Boolean = false,
         edit: (current: String) -> Edit,
-    ): MemoryWriteResult = writeLock.withLock {
-        val normalized = MemoryFile.normalizePath(path) ?: return invalidPath(path)
+    ): MemoryWriteResult = memoryDAO.writeTransaction {
+        val normalized = MemoryFile.normalizePath(path) ?: return@writeTransaction invalidPath(path)
         val current = memoryDAO.getFile(assistantId, normalized)?.toMemoryFile()
         val versionMatches = when (ifVersion) {
             null -> current != null || allowCreate
             NEW_FILE_VERSION -> current == null && allowCreate
             else -> current?.version == ifVersion
         }
-        if (!versionMatches) return MemoryWriteResult.Conflict(current)
+        if (!versionMatches) return@writeTransaction MemoryWriteResult.Conflict(current)
 
         val content = when (val result = edit(current?.content.orEmpty())) {
-            is Edit.Reject -> return MemoryWriteResult.Rejected(result.reason)
+            is Edit.Reject -> return@writeTransaction MemoryWriteResult.Rejected(result.reason)
             is Edit.Content -> result.content
         }
-        // 只拦会让文件变大的超限写入：迁移来的旧记忆可能本来就超限，得允许一点点删小
-        val size = content.toByteArray().size
-        if (size > MemoryFile.MAX_BYTES && size > current?.content?.toByteArray()?.size ?: 0) {
-            return MemoryWriteResult.Rejected(
-                "$normalized would exceed the ${MemoryFile.MAX_BYTES / 1024}KB limit. " +
-                    "Merge duplicates and drop outdated details instead of adding more."
-            )
-        }
+        persist(assistantId, normalized, content, current)
+    }
+
+    private suspend fun persist(
+        assistantId: String,
+        normalized: String,
+        content: String,
+        current: MemoryFile?,
+    ): MemoryWriteResult {
+        if (content == current?.content) return MemoryWriteResult.Success(current)
         val entity = MemoryFileEntity(
             assistantId = assistantId,
             path = normalized,
             content = content,
             updatedAt = System.currentTimeMillis(),
         )
-        memoryDAO.upsertFile(entity)
-        MemoryWriteResult.Success(entity.toMemoryFile())
+        try {
+            memoryDAO.upsertFile(entity)
+        } catch (exception: IllegalArgumentException) {
+            return MemoryWriteResult.Rejected(exception.message ?: "Invalid memory content.")
+        }
+        return MemoryWriteResult.Success(entity.toMemoryFile())
     }
 
     private fun invalidPath(path: String) = MemoryWriteResult.Rejected(

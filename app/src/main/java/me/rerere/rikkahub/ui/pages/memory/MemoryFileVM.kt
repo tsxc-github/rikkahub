@@ -18,7 +18,7 @@ sealed interface MemoryFileState {
     /** 文件不存在：路径不合法，或者已经被删掉 */
     data object Missing : MemoryFileState
 
-    data class Loaded(val file: MemoryFile) : MemoryFileState
+    data class Loaded(val file: MemoryFile, val generation: Long) : MemoryFileState
 }
 
 /**
@@ -38,8 +38,10 @@ class MemoryFileVM(
         if (normalizedPath == null) {
             flowOf(MemoryFileState.Missing)
         } else {
-            memoryRepository.getFilesFlow(memoryId).map { files ->
-                files.find { it.path == normalizedPath }?.let(MemoryFileState::Loaded) ?: MemoryFileState.Missing
+            memoryRepository.getFilesWithGenerationFlow(memoryId).map { files ->
+                files.find { it.first.path == normalizedPath }?.let {
+                    MemoryFileState.Loaded(it.first, it.second)
+                } ?: MemoryFileState.Missing
             }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, MemoryFileState.Loading)
 
@@ -50,18 +52,17 @@ class MemoryFileVM(
         }
     }
 
-    fun save(content: String, onResult: (MemoryWriteResult) -> Unit) {
-        val path = normalizedPath ?: return
+    fun save(content: String, expectedGeneration: Long, onResult: (MemoryWriteResult) -> Unit) {
+        val path = normalizedPath ?: return onResult(MemoryWriteResult.Rejected("Invalid memory path."))
         viewModelScope.launch {
-            onResult(memoryRepository.writeFile(memoryId, path, content))
+            onResult(memoryRepository.writeAtGeneration(memoryId, path, content, expectedGeneration))
         }
     }
 
-    fun delete(onDeleted: () -> Unit) {
-        val path = normalizedPath ?: return
+    fun delete(expectedGeneration: Long, onResult: (MemoryWriteResult) -> Unit) {
+        val path = normalizedPath ?: return onResult(MemoryWriteResult.Rejected("Invalid memory path."))
         viewModelScope.launch {
-            memoryRepository.deleteFile(memoryId, path)
-            onDeleted()
+            onResult(memoryRepository.writeAtGeneration(memoryId, path, null, expectedGeneration))
         }
     }
 }

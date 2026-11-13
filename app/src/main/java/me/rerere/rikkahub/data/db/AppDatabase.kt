@@ -28,6 +28,7 @@ import me.rerere.rikkahub.data.db.entity.MediaCreationRecordEntity
 import me.rerere.rikkahub.data.db.entity.MediaCreationSessionEntity
 import me.rerere.rikkahub.data.db.entity.MemoryConsolidationEntity
 import me.rerere.rikkahub.data.db.entity.MemoryFileEntity
+import me.rerere.rikkahub.data.db.entity.MemoryRevisionEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
 import me.rerere.rikkahub.data.db.entity.TranslationHistoryEntity
 import me.rerere.rikkahub.data.db.entity.UsageRecordEntity
@@ -42,6 +43,7 @@ import me.rerere.rikkahub.utils.JsonInstant
     entities = [
         ConversationEntity::class,
         MemoryFileEntity::class,
+        MemoryRevisionEntity::class,
         MemoryConsolidationEntity::class,
         GenMediaEntity::class,
         MessageNodeEntity::class,
@@ -55,7 +57,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         TranslationHistoryEntity::class,
         UsageRecordEntity::class,
     ],
-    version = 32,
+    version = 33,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),

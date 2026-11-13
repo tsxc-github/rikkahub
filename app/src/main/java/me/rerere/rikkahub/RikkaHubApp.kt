@@ -115,6 +115,7 @@ class RikkaHubApp : Application() {
         // Resume media generations interrupted by the last process death
         resumeMediaCreations()
         resumeMemoryConsolidation()
+        resumeMemorySync()
 
         // Increment launch count
         incrementLaunchCount()
@@ -146,6 +147,20 @@ class RikkaHubApp : Application() {
                 Log.e(TAG, "resumeMemoryConsolidation failed", it)
             }
         }
+    }
+
+    private fun resumeMemorySync() {
+        val manager = get<me.rerere.rikkahub.data.sync.memory.MemorySyncManager>()
+        manager.start()
+        val lifecycle = ProcessLifecycleOwner.get().lifecycle
+        manager.setForeground(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+        lifecycle.addObserver(LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> manager.setForeground(true)
+                Lifecycle.Event.ON_STOP -> manager.setForeground(false)
+                else -> Unit
+            }
+        })
     }
 
     private fun incrementLaunchCount() {

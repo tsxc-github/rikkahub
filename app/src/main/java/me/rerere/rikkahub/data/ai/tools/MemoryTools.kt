@@ -108,9 +108,7 @@ fun buildMemoryTools(
         execute = { args ->
             val path = args.string("path")
             val content = args.string("content")
-            guarded(content) {
-                repository.writeFile(assistantId, path, content, args.string("if_version"))
-            }.toToolOutput(path)
+            repository.writeFile(assistantId, path, content, args.string("if_version")).toToolOutput(path)
         }
     ),
     Tool(
@@ -133,9 +131,8 @@ fun buildMemoryTools(
         execute = { args ->
             val path = args.string("path")
             val newStr = args.string("new_str")
-            guarded(newStr) {
-                repository.replaceInFile(assistantId, path, args.string("old_str"), newStr, args.string("if_version"))
-            }.toToolOutput(path)
+            repository.replaceInFile(assistantId, path, args.string("old_str"), newStr, args.string("if_version"))
+                .toToolOutput(path)
         }
     ),
     Tool(
@@ -155,9 +152,7 @@ fun buildMemoryTools(
             val path = args.string("path")
             val content = args.string("content")
             if (content.isBlank()) error("content must not be blank")
-            guarded(content) {
-                repository.appendToFile(assistantId, path, content, args.string("if_version"))
-            }.toToolOutput(path)
+            repository.appendToFile(assistantId, path, content, args.string("if_version")).toToolOutput(path)
         }
     ),
     Tool(
@@ -225,14 +220,6 @@ private fun JsonElement.string(key: String): String =
 
 private fun toolOutput(builder: JsonObjectBuilder.() -> Unit): List<UIMessagePart> =
     listOf(UIMessagePart.Text(buildJsonObject(builder).toString()))
-
-private inline fun guarded(content: String, write: () -> MemoryWriteResult): MemoryWriteResult {
-    val forbidden = findForbiddenMemoryContent(content) ?: return write()
-    return MemoryWriteResult.Rejected(
-        "Refused: the content looks like it contains $forbidden, which is never stored in memory. " +
-            "Leave it out, and tell the user in one sentence that it cannot be saved."
-    )
-}
 
 // 冲突时带上最新内容和版本，模型可以在同一轮里合并后重试
 private fun MemoryWriteResult.toToolOutput(path: String): List<UIMessagePart> = toolOutput {

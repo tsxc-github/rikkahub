@@ -98,13 +98,19 @@ fun MemoryFilePage(memoryId: String, path: String?) {
     var draftAliasInput by rememberSaveable { mutableStateOf("") }
     var draftBody by rememberSaveable { mutableStateOf("") }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var draftGeneration by rememberSaveable { mutableStateOf(0L) }
+    var draftOriginalContent by rememberSaveable { mutableStateOf<String?>(null) }
+    val draftOriginal = remember(draftOriginalContent, path) {
+        draftOriginalContent?.let { MemoryFile(path.orEmpty(), it, 0) }
+    }
+    var deleteGeneration by remember { mutableStateOf(0L) }
 
     val pathConflictMessage = stringResource(R.string.memory_file_page_path_conflict)
 
     val normalizedDraftPath = MemoryFile.normalizePath(draftPath)
     val draftPathValid = normalizedDraftPath != null
     // 新建时还没有文件，拿路径造一个空的来拼内容
-    val base = file ?: remember(normalizedDraftPath) {
+    val base = draftOriginal ?: file ?: remember(normalizedDraftPath) {
         MemoryFile(path = normalizedDraftPath.orEmpty(), content = "", updatedAt = 0)
     }
     // 输入框里打了字没点添加就保存的，也算一个别名，不然就悄悄丢了
@@ -113,11 +119,11 @@ fun MemoryFilePage(memoryId: String, path: String?) {
     }
     // 和没改过的各项拼出来的内容比，而不是和原文比：原文的 YAML 写法可能和这里拼的不一样，
     // 直接比的话什么都没改也会显示成可以保存
-    val unchangedContent = remember(file) {
-        file?.run { contentWith(title, description, aliases, editableBody) }
+    val unchangedContent = remember(draftOriginal) {
+        draftOriginal?.run { contentWith(title, description, aliases, editableBody) }
     }
     // 和仓库层一样只拦变大的超限：迁移来的旧记忆可能本来就超限，得允许分几次删小
-    val currentSize = remember(file) { file?.content?.toByteArray()?.size ?: 0 }
+    val currentSize = remember(draftOriginal, file) { (draftOriginal ?: file)?.content?.toByteArray()?.size ?: 0 }
     val draftSize = draftContent.toByteArray().size
     val draftContentValid = draftSize <= MemoryFile.MAX_BYTES || draftSize <= currentSize
     val canSave = draftContentValid && if (isNew) draftPathValid else draftContent != unchangedContent
@@ -179,15 +185,18 @@ fun MemoryFilePage(memoryId: String, path: String?) {
                                 if (isNew) {
                                     vm.create(draftPath, draftContent, ::onSaved)
                                 } else {
-                                    vm.save(draftContent, ::onSaved)
+                                    vm.save(draftContent, draftGeneration, ::onSaved)
                                 }
                             },
                         ) {
                             Text(stringResource(R.string.assistant_page_save))
                         }
                     } else if (file != null) {
+                        MemoryMarkdownExportButton(file)
                         IconButton(
                             onClick = {
+                                draftOriginalContent = file.content
+                                draftGeneration = (state as MemoryFileState.Loaded).generation
                                 draftTitle = file.title
                                 draftDescription = file.description
                                 draftAliases = file.aliases
@@ -201,7 +210,10 @@ fun MemoryFilePage(memoryId: String, path: String?) {
                                 contentDescription = stringResource(R.string.edit),
                             )
                         }
-                        IconButton(onClick = { showDeleteDialog = true }) {
+                        IconButton(onClick = {
+                            deleteGeneration = (state as MemoryFileState.Loaded).generation
+                            showDeleteDialog = true
+                        }) {
                             Icon(
                                 imageVector = HugeIcons.Delete01,
                                 contentDescription = stringResource(R.string.delete),
@@ -261,7 +273,13 @@ fun MemoryFilePage(memoryId: String, path: String?) {
         dismissText = stringResource(R.string.cancel),
         onConfirm = {
             showDeleteDialog = false
-            vm.delete { navController.popBackStack() }
+            vm.delete(deleteGeneration) { result ->
+                when (result) {
+                    is MemoryWriteResult.Success -> navController.popBackStack()
+                    is MemoryWriteResult.Conflict -> toaster.show(message = pathConflictMessage, type = ToastType.Error)
+                    is MemoryWriteResult.Rejected -> toaster.show(message = result.reason, type = ToastType.Error)
+                }
+            }
         },
         onDismiss = { showDeleteDialog = false },
         text = {

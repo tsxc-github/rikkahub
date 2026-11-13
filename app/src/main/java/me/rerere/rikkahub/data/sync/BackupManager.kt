@@ -193,6 +193,11 @@ class BackupManager(
 
         /** Must finish before Koin, Room, SettingsStore or any background consumers are initialized. */
         suspend fun applyPendingRestore(context: Context, json: Json): Boolean = withContext(Dispatchers.IO) {
+            if (File(context.noBackupFilesDir, "backup-restore/pending").isDirectory) {
+                me.rerere.rikkahub.data.sync.memory.MemorySyncStore.markRestore(
+                    File(context.noBackupFilesDir, "memory-sync"),
+                )
+            }
             pendingRestore(context).apply { settingsJson ->
                 SettingsStore.restoreBeforeInitialization(
                     context = context,

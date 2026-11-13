@@ -83,8 +83,8 @@ android {
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
         }
         debug {
-            // ops-v2: parallel install with the upstream release
-            applicationIdSuffix = ".ops"
+            // Memory sync tests must never install over the daily ops-v2 application.
+            applicationIdSuffix = ".memoryprobe"
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
         }

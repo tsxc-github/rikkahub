@@ -1,8 +1,12 @@
 package me.rerere.rikkahub.data.repository
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import me.rerere.rikkahub.data.db.entity.MemoryFileEntity
 import me.rerere.rikkahub.data.model.MemoryFile
+import me.rerere.rikkahub.data.model.MemoryDocumentSnapshot
 import me.rerere.rikkahub.data.model.groupByDirectory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -122,7 +126,7 @@ class MemoryRepositoryTest {
     fun `an oversized file can shrink but not grow`() = runBlocking {
         // 迁移直接写库，不经过大小检查
         val lines = List(MemoryFile.MAX_BYTES / 1000 + 10) { "- [stated] Fact $it ${"x".repeat(1000)}\n" }
-        dao.upsertFile(MemoryFileEntity(assistant, "/profile.md", lines.joinToString(""), updatedAt = 0))
+        dao.seedLegacyFile(MemoryFileEntity(assistant, "/profile.md", lines.joinToString(""), updatedAt = 0))
         val file = repository.getFile(assistant, "/profile.md")!!
 
         val append = repository.appendToFile(assistant, "/profile.md", "- [stated] More", file.version)
@@ -246,5 +250,95 @@ class MemoryRepositoryTest {
             """.trimIndent(),
             file.displayBody.trim(),
         )
+    }
+
+    @Test
+    fun `generation CAS serializes independent repositories`() = runBlocking {
+        val writers = List(24) { MemoryRepository(dao) }
+        val results = writers.mapIndexed { index, writer ->
+            async(Dispatchers.Default) { writer.writeAtGeneration(assistant, "/profile.md", "writer $index", 0) }
+        }.awaitAll()
+        assertEquals(1, results.count { it is MemoryWriteResult.Success })
+        assertEquals(23, results.count { it is MemoryWriteResult.Conflict })
+        assertEquals(1L, repository.snapshot(assistant, "/profile.md").generation)
+    }
+
+    @Test
+    fun `delete recreate preserves monotonic revision despite identical hash`() = runBlocking {
+        val original = create("/profile.md", "same")
+        assertEquals(1L, repository.snapshot(assistant, "/profile.md").generation)
+        assertTrue(repository.writeAtGeneration(assistant, "/profile.md", null, 1) is MemoryWriteResult.Success)
+        assertEquals(MemoryDocumentSnapshot("/profile.md", null, 2), repository.snapshot(assistant, "/profile.md"))
+        assertTrue(repository.writeAtGeneration(assistant, "/profile.md", "same", 2) is MemoryWriteResult.Success)
+        assertEquals(original.version, repository.getFile(assistant, "/profile.md")!!.version)
+        assertTrue(repository.writeAtGeneration(assistant, "/profile.md", "stale", 1) is MemoryWriteResult.Conflict)
+        assertTrue(repository.writeAtGeneration(assistant, "/profile.md", null, 2) is MemoryWriteResult.Conflict)
+        assertEquals(MemoryDocumentSnapshot("/profile.md", "same", 3), repository.snapshot(assistant, "/profile.md"))
+    }
+
+    @Test
+    fun `no ops do not advance and never existed is generation zero`() = runBlocking {
+        assertEquals(MemoryDocumentSnapshot("/new.md", null, 0), repository.snapshot(assistant, "/new.md"))
+        repository.writeAtGeneration(assistant, "/new.md", null, 0)
+        assertTrue(repository.snapshots(assistant).isEmpty())
+        create("/profile.md", "same")
+        repository.writeFile(assistant, "/profile.md", "same")
+        repository.writeAtGeneration(assistant, "/profile.md", "same", 1)
+        assertEquals(1L, repository.snapshot(assistant, "/profile.md").generation)
+        repository.writeAtGeneration(assistant, "/profile.md", null, 1)
+        repository.writeAtGeneration(assistant, "/profile.md", null, 2)
+        assertEquals(2L, repository.snapshot(assistant, "/profile.md").generation)
+    }
+
+    @Test
+    fun `all direct DAO mutations copy and bulk deletion keep revisions`() = runBlocking {
+        dao.upsertFile(MemoryFileEntity(assistant, "/a.md", "one", 1))
+        dao.upsertFiles(listOf(MemoryFileEntity(assistant, "/b.md", "two", 2)))
+        repository.copyFiles(assistant, "target")
+        assertEquals(listOf(1L, 1L), repository.snapshots("target").map { it.generation })
+        dao.upsertFile(MemoryFileEntity(assistant, "/a.md", "changed", 3))
+        repository.copyFiles(assistant, "target")
+        assertEquals(listOf(2L, 1L), repository.snapshots("target").map { it.generation })
+        dao.deleteFilesOfAssistant("target")
+        assertEquals(
+            listOf(MemoryDocumentSnapshot("/a.md", null, 3), MemoryDocumentSnapshot("/b.md", null, 2)),
+            repository.snapshots("target"),
+        )
+        repository.deleteFilesOfAssistant("target")
+        assertEquals(listOf(3L, 2L), repository.snapshots("target").map { it.generation })
+        assertEquals(2, repository.getFiles(assistant).size)
+    }
+
+    @Test
+    fun `sensitive content policy cannot be bypassed by partial edits or DAO batches`() = runBlocking {
+        create("/profile.md", "123-45-")
+        assertTrue(repository.appendToFile(assistant, "/profile.md", "6789", null) is MemoryWriteResult.Success)
+        // Replacement can form a sensitive value even when the replacement fragment itself is harmless.
+        create("/ssn.md", "123-45-XXXX")
+        assertTrue(repository.replaceInFile(assistant, "/ssn.md", "XXXX", "6789", null) is MemoryWriteResult.Rejected)
+        assertTrue(repository.writeAtGeneration(assistant, "/new.md", "4111 1111 1111 1111", 0) is MemoryWriteResult.Rejected)
+        try {
+            dao.upsertFiles(
+                listOf(
+                    MemoryFileEntity(assistant, "/ok.md", "valid", 1),
+                    MemoryFileEntity(assistant, "/bad.md", "123-45-6789", 1),
+                )
+            )
+            throw AssertionError("Sensitive batch must be rejected")
+        } catch (_: IllegalArgumentException) {
+            assertNull(repository.getFile(assistant, "/ok.md"))
+            assertEquals(0L, repository.snapshot(assistant, "/ok.md").generation)
+        }
+    }
+
+    @Test
+    fun `generation writes shrink legacy oversized UTF8 without truncation`() = runBlocking {
+        val legacy = "记".repeat(MemoryFile.MAX_BYTES)
+        dao.seedLegacyFile(MemoryFileEntity(assistant, "/profile.md", legacy, 0))
+        val smaller = legacy.dropLast(1)
+        assertTrue(repository.writeAtGeneration(assistant, "/profile.md", legacy + "a", 1) is MemoryWriteResult.Rejected)
+        assertEquals(1L, repository.snapshot(assistant, "/profile.md").generation)
+        assertTrue(repository.writeAtGeneration(assistant, "/profile.md", smaller, 1) is MemoryWriteResult.Success)
+        assertEquals(MemoryDocumentSnapshot("/profile.md", smaller, 2), repository.snapshot(assistant, "/profile.md"))
     }
 }

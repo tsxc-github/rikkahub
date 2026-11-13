@@ -2,7 +2,14 @@
 
 ## 阅读规则
 
-本页是 2026-11-13 资料整理时对既有记录的核对；没有在本轮重跑 APK/JVM/真机测试。检查必须区分：源码编译、JVM 测试、静态 APK 核验、普通 Linux 探针、Android 真机、Windows 客户端、VS Code 完整窗口。一个层级通过不代表下一个层级通过。
+下方既有 ops-v2 / SSH 记录来自 2026-11-13 资料整理时对历史证据的核对，不是新功能的重跑结果。记忆同步特性线单独记录本次检查。源码编译、JVM、静态 APK、Linux 探针、Android 真机、Windows 客户端与 VS Code 完整窗口是不同层级，一个通过不代表下一个通过。
+
+## Markdown 记忆同步特性线
+
+- 开发基线为后续 `ops-v2@5ebbc986e68ad102d7ab6af4ca95fac10226779a`，已包含上游 3.2.0 / code 196；不是下面历史记录的 3.1.2 tip。
+- 独立开发分支 `feat/memory-markdown-sync`，不合入 `ssh-p1` 实验。测试 debug 包 `me.rerere.rikkahub.memoryprobe`，不覆盖 `.ops` 日用数据。
+- 新增原文 Markdown/ZIP/SAF 交换、事务 generation、SSH helper 双向同步、冲突处理和一键自动测试；使用与安全边界见 [memory-sync/README](../memory-sync/README.md)。
+- 本功能实际运行结果见 [memory-sync/VALIDATION](../memory-sync/VALIDATION.md)；下述旧 JVM、APK 和真机记录不能替代新功能验证。
 
 ## ops-v2（日用线）
 

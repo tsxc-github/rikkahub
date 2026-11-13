@@ -18,26 +18,6 @@
       "source": "authored-for-github-handoff"
     },
     {
-      "path": "MAINTENANCE.md",
-      "sha256": "35363a937de66e9d9c601e1d6580fa0e4c0713cdaa9cc4cb201b152a40c258df",
-      "source": "authored-for-github-handoff"
-    },
-    {
-      "path": "README.md",
-      "sha256": "d1646b0bed9d77c43e01900158f75d72b35db6a9ed07ae1ce2ed603b44eed592",
-      "source": "authored-for-github-handoff"
-    },
-    {
-      "path": "STATUS.md",
-      "sha256": "bac1f4c96c5391ffffed4bdb944f10e1f088f4dc1b2720b45fcb105ec7f8d6c9",
-      "source": "authored-for-github-handoff"
-    },
-    {
-      "path": "VALIDATION.md",
-      "sha256": "818ce94f7d0c6a7358d03eb7427e79f1531b4fc5b3ff4a84261c4fdd3a6a4879",
-      "source": "authored-for-github-handoff"
-    },
-    {
       "path": "history/INDEX.md",
       "sha256": "649b9d049cdc0912c4a990c2e9107655f75ae9b6fac4a46be0239aeea1031680",
       "source": "authored-for-github-handoff"
@@ -178,23 +158,13 @@
       "source": "/workspace/projects/rikkahub-ssh/REBASE-3.1.2.md"
     },
     {
-      "path": "scripts/README.md",
-      "sha256": "d356e69e12bfbf2439875a3dfcb9e88038312171e7bf5fe3e93800dc344b9914",
+      "path": "MAINTENANCE.md",
+      "sha256": "35363a937de66e9d9c601e1d6580fa0e4c0713cdaa9cc4cb201b152a40c258df",
       "source": "authored-for-github-handoff"
     },
     {
-      "path": "scripts/Run-Build.ps1",
-      "sha256": "05807e5de072d372dd94beacf963eb97b4b683529651e2caaaac67fc6cd5c735",
-      "source": "authored-for-github-handoff"
-    },
-    {
-      "path": "scripts/Test-Handoff.ps1",
-      "sha256": "ce5240e65f4f0e416040e09d4661b9d88ceafae6d23a8c82d8c75978959ae0a4",
-      "source": "authored-for-github-handoff"
-    },
-    {
-      "path": "scripts/Update-Manifest.ps1",
-      "sha256": "26f5c4c7a1cffd58ce8bfc7255ff6241ce755fc5082d0ad6506d34f9bea81e04",
+      "path": "README.md",
+      "sha256": "d1646b0bed9d77c43e01900158f75d72b35db6a9ed07ae1ce2ed603b44eed592",
       "source": "authored-for-github-handoff"
     },
     {
@@ -221,6 +191,26 @@
       "path": "scripts/legacy-ssh/Build-Lan.ps1",
       "sha256": "66fd513f81e5e0648bab70bcecaa315f68dfd9463cbae9d22e4d20f8e5b08a02",
       "source": "/workspace/projects/rikkahub-ssh/Build-Lan.ps1"
+    },
+    {
+      "path": "scripts/legacy-ssh/build-p0-v312.sh",
+      "sha256": "86296677d3de3f9a0ecb57d9200eaab49c9d2a8383765b91448d99dbde2460fb",
+      "source": "/workspace/projects/rikkahub-ssh/build-p0-v312.sh"
+    },
+    {
+      "path": "scripts/legacy-ssh/build-p0.sh",
+      "sha256": "510d38db10d8f255ef4d90fd0320497bfaf3df0b5d3c49231cc5772e602eb15e",
+      "source": "/workspace/projects/rikkahub-ssh/build-p0.sh"
+    },
+    {
+      "path": "scripts/legacy-ssh/build-p1.sh",
+      "sha256": "d2c023ebeb30d5fca9eef8edd9a9a4cab3fb6a739758d76fd4a59441ad13ac7e",
+      "source": "/workspace/projects/rikkahub-ssh/build-p1.sh"
+    },
+    {
+      "path": "scripts/legacy-ssh/p0_probe.py",
+      "sha256": "3708cfabf908dda1770d1c0bbb2fdf2fbb0137699df2c4a549998ba349d6c627",
+      "source": "/workspace/projects/rikkahub-ssh/p0_probe.py"
     },
     {
       "path": "scripts/legacy-ssh/Publish-IpcPackage.ps1",
@@ -253,6 +243,16 @@
       "source": "/workspace/projects/rikkahub-ssh/Verify-LanPackage.ps1"
     },
     {
+      "path": "scripts/legacy-ssh/verify-p1-core.py",
+      "sha256": "269827faf1d8530ab7ebb3cc73f1bbfbd6b5a696defe862898f77a6f410dd0d4",
+      "source": "/workspace/projects/rikkahub-ssh/verify-p1-core.py"
+    },
+    {
+      "path": "scripts/legacy-ssh/watch-build-progress.py",
+      "sha256": "da38153543fa7979d993ef27ba6aa3a3f5dad3b2f9c607f1fe7c380a9df20adb",
+      "source": "/workspace/projects/rikkahub-ssh/watch-build-progress.py"
+    },
+    {
       "path": "scripts/legacy-ssh/Watch-IpcBuild.ps1",
       "sha256": "7ae2fca64e7ab6d7a0ef3251d93845c4dbec2d69061445288cfc49aba4aa44ad",
       "source": "/workspace/projects/rikkahub-ssh/Watch-IpcBuild.ps1"
@@ -263,34 +263,24 @@
       "source": "/workspace/projects/rikkahub-ssh/Watch-LanBuild.ps1"
     },
     {
-      "path": "scripts/legacy-ssh/build-p0-v312.sh",
-      "sha256": "86296677d3de3f9a0ecb57d9200eaab49c9d2a8383765b91448d99dbde2460fb",
-      "source": "/workspace/projects/rikkahub-ssh/build-p0-v312.sh"
+      "path": "scripts/README.md",
+      "sha256": "d356e69e12bfbf2439875a3dfcb9e88038312171e7bf5fe3e93800dc344b9914",
+      "source": "authored-for-github-handoff"
     },
     {
-      "path": "scripts/legacy-ssh/build-p0.sh",
-      "sha256": "510d38db10d8f255ef4d90fd0320497bfaf3df0b5d3c49231cc5772e602eb15e",
-      "source": "/workspace/projects/rikkahub-ssh/build-p0.sh"
+      "path": "scripts/Run-Build.ps1",
+      "sha256": "29fe1fa80a1c1ff7699b7eaa1d1412b0b86d11fd950a94facf88107aa51df116",
+      "source": "authored-for-github-handoff"
     },
     {
-      "path": "scripts/legacy-ssh/build-p1.sh",
-      "sha256": "d2c023ebeb30d5fca9eef8edd9a9a4cab3fb6a739758d76fd4a59441ad13ac7e",
-      "source": "/workspace/projects/rikkahub-ssh/build-p1.sh"
+      "path": "scripts/Test-Handoff.ps1",
+      "sha256": "ce5240e65f4f0e416040e09d4661b9d88ceafae6d23a8c82d8c75978959ae0a4",
+      "source": "authored-for-github-handoff"
     },
     {
-      "path": "scripts/legacy-ssh/p0_probe.py",
-      "sha256": "3708cfabf908dda1770d1c0bbb2fdf2fbb0137699df2c4a549998ba349d6c627",
-      "source": "/workspace/projects/rikkahub-ssh/p0_probe.py"
-    },
-    {
-      "path": "scripts/legacy-ssh/verify-p1-core.py",
-      "sha256": "269827faf1d8530ab7ebb3cc73f1bbfbd6b5a696defe862898f77a6f410dd0d4",
-      "source": "/workspace/projects/rikkahub-ssh/verify-p1-core.py"
-    },
-    {
-      "path": "scripts/legacy-ssh/watch-build-progress.py",
-      "sha256": "da38153543fa7979d993ef27ba6aa3a3f5dad3b2f9c607f1fe7c380a9df20adb",
-      "source": "/workspace/projects/rikkahub-ssh/watch-build-progress.py"
+      "path": "scripts/Update-Manifest.ps1",
+      "sha256": "26f5c4c7a1cffd58ce8bfc7255ff6241ce755fc5082d0ad6506d34f9bea81e04",
+      "source": "authored-for-github-handoff"
     },
     {
       "path": "scripts/windows/BUILD-STATUS.txt",
@@ -361,6 +351,16 @@
       "path": "scripts/windows/WINDOWS-TESTING.md",
       "sha256": "eaa7da0397bc386fa0f1aca95bf46fb69f998c2b9e6de405ba4c4dbc2d949d54",
       "source": "/workspace/projects/rikkahub-ssh/windows/WINDOWS-TESTING.md"
+    },
+    {
+      "path": "STATUS.md",
+      "sha256": "2c2faf0b6eed233cff569e36f21ee59c75a879137d96063b51e1df00445f2a2b",
+      "source": "authored-for-github-handoff"
+    },
+    {
+      "path": "VALIDATION.md",
+      "sha256": "818ce94f7d0c6a7358d03eb7427e79f1531b4fc5b3ff4a84261c4fdd3a6a4879",
+      "source": "authored-for-github-handoff"
     }
   ]
 }
