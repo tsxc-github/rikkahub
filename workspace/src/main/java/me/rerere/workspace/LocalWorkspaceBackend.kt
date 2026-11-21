@@ -58,7 +58,7 @@ class LocalWorkspaceBackend(
     // region ops-v2
     override fun readAbsoluteChunk(path: String, offset: Long, maxBytes: Int): WorkspaceReadChunk {
         manager.ensureWorkspace(root)
-        return manager.resolveRootfsFile(root, path).readWorkspaceChunk(offset, maxBytes)
+        return localAbsoluteFile(path).readWorkspaceChunk(offset, maxBytes)
     }
     // endregion
 

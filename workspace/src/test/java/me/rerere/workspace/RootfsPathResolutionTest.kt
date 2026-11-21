@@ -74,6 +74,11 @@ class RootfsPathResolutionTest {
         assertEquals(12L, manager.rootfsFileSize(root, "/storage/emulated/0/Documents/a.txt", extra))
         assertTrue(manager.layout(extra).isWritable("/storage/emulated/0/Documents/a.txt"))
 
+        val chunk = LocalWorkspaceBackend(manager, root, extraMounts = extra)
+            .readAbsoluteChunk("/storage/emulated/0/Documents/a.txt", offset = 5, maxBytes = 4)
+        assertEquals("stor", chunk.bytes.decodeToString())
+        assertEquals(12L, chunk.size)
+
         // 不传工作区挂载时落到 Rootfs 目录, 其他工作区看不到
         assertEquals(
             manager.linuxDir(root),
