@@ -5,8 +5,12 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -23,16 +27,19 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetState
@@ -49,19 +56,34 @@ import me.rerere.rikkahub.R
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import me.rerere.rikkahub.data.sync.BackupManager
+import me.rerere.rikkahub.ui.pages.backup.components.BackupDialog
+import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.hooks.writeStringPreference
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
 import me.rerere.rikkahub.RouteActivity
 import me.rerere.rikkahub.utils.CrashHandler
 import org.koin.android.ext.android.inject
+import java.io.File
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import kotlin.uuid.Uuid
+
+private const val TAG = "SafeModeActivity"
+
+// 盘上单个字段超过这么多字符才算「超大」：正常使用到不了这个量级，到了就可能在读写设置时撑爆内存
+private const val LARGE_FIELD_MIN_CHARS = 5_000_000
 
 class SafeModeActivity : ComponentActivity() {
     private val settingsStore by inject<SettingsStore>()
+    private val backupManager by inject<BackupManager>()
 
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,8 +95,87 @@ class SafeModeActivity : ComponentActivity() {
             RikkahubTheme {
                 val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
                 var showAssistantPicker by remember { mutableStateOf(false) }
+                val largeFields by remember { settingsStore.largeStoredFieldsFlow(LARGE_FIELD_MIN_CHARS) }
+                    .collectAsStateWithLifecycle(emptyList())
+                var pendingClearKey by remember { mutableStateOf<String?>(null) }
+                var clearing by remember { mutableStateOf(false) }
+                var exporting by remember { mutableStateOf(false) }
+                var importing by remember { mutableStateOf(false) }
+                var showImportConfirm by remember { mutableStateOf(false) }
+                var restoreStaged by remember { mutableStateOf(false) }
+                val busy = exporting || importing
                 val scope = rememberCoroutineScope()
                 val context = LocalContext.current
+                // 崩溃后进不去主界面时的兜底：导出和备份页一样的完整备份包，之后能在备份页正常导入
+                val exportLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.CreateDocument("application/zip")
+                ) { uri ->
+                    if (uri == null) return@rememberLauncherForActivityResult
+                    exporting = true
+                    scope.launch {
+                        try {
+                            val archive = backupManager.createBackup(includeDatabase = true, includeFiles = true)
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    val output = contentResolver.openOutputStream(uri)
+                                        ?: error("Cannot open the selected file")
+                                    output.use { archive.inputStream().use { input -> input.copyTo(it) } }
+                                }
+                            } finally {
+                                archive.delete()
+                            }
+                            Toast.makeText(
+                                context,
+                                getString(R.string.backup_page_backup_success),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Throwable) {
+                            Log.e(TAG, "Failed to export backup", e)
+                            Toast.makeText(context, "Export failed: ${e.message ?: e}", Toast.LENGTH_LONG).show()
+                        } finally {
+                            exporting = false
+                        }
+                    }
+                }
+
+                // 和备份页的本地导入一样：先校验并暂存，下次启动时在 Room 打开库之前替换，当前的库坏了也能恢复
+                val importLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.OpenDocument()
+                ) { uri ->
+                    if (uri == null) return@rememberLauncherForActivityResult
+                    importing = true
+                    scope.launch {
+                        try {
+                            val archive = withContext(Dispatchers.IO) {
+                                File.createTempFile("safe_mode_restore_", ".zip", cacheDir).also { file ->
+                                    try {
+                                        val input = contentResolver.openInputStream(uri)
+                                            ?: error("Cannot open the selected file")
+                                        input.use { file.outputStream().use { output -> it.copyTo(output) } }
+                                    } catch (e: Throwable) {
+                                        file.delete()
+                                        throw e
+                                    }
+                                }
+                            }
+                            try {
+                                backupManager.stageRestore(archive, includeDatabase = true, includeFiles = true)
+                            } finally {
+                                archive.delete()
+                            }
+                            restoreStaged = true
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Throwable) {
+                            Log.e(TAG, "Failed to import backup", e)
+                            Toast.makeText(context, "Import failed: ${e.message ?: e}", Toast.LENGTH_LONG).show()
+                        } finally {
+                            importing = false
+                        }
+                    }
+                }
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
@@ -103,6 +204,16 @@ class SafeModeActivity : ComponentActivity() {
                         )
 
                         Button(
+                            onClick = {
+                                startActivity(Intent(this@SafeModeActivity, RouteActivity::class.java))
+                                finish()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(stringResource(R.string.safe_mode_enter_app))
+                        }
+
+                        OutlinedButton(
                             onClick = { showAssistantPicker = true },
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -111,12 +222,54 @@ class SafeModeActivity : ComponentActivity() {
 
                         OutlinedButton(
                             onClick = {
-                                startActivity(Intent(this@SafeModeActivity, RouteActivity::class.java))
-                                finish()
+                                val timestamp = LocalDateTime.now()
+                                    .format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+                                exportLauncher.launch("rikkahub_backup_$timestamp.zip")
                             },
+                            enabled = !busy,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(stringResource(R.string.safe_mode_enter_app))
+                            Text(
+                                stringResource(
+                                    if (exporting) R.string.backup_page_exporting else R.string.backup_page_export_desc
+                                )
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = { showImportConfirm = true },
+                            enabled = !busy,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                stringResource(
+                                    if (importing) R.string.backup_page_importing else R.string.backup_page_import_desc
+                                )
+                            )
+                        }
+
+                        if (largeFields.isNotEmpty()) {
+                            CardGroup(
+                                modifier = Modifier.fillMaxWidth(),
+                                title = { Text("Oversized data") },
+                            ) {
+                                largeFields.forEach { (key, chars) ->
+                                    item(
+                                        headlineContent = { Text(storedFieldLabel(key)) },
+                                        supportingContent = {
+                                            Text("%.1f million characters".format(chars / 1_000_000f))
+                                        },
+                                        trailingContent = {
+                                            FilledTonalButton(
+                                                onClick = { pendingClearKey = key },
+                                                enabled = !clearing,
+                                            ) {
+                                                Text("Clear")
+                                            }
+                                        },
+                                    )
+                                }
+                            }
                         }
 
                         if (stackTrace != null) {
@@ -161,6 +314,66 @@ class SafeModeActivity : ComponentActivity() {
                     }
                 }
 
+                if (showImportConfirm) {
+                    AlertDialog(
+                        onDismissRequest = { showImportConfirm = false },
+                        title = { Text(stringResource(R.string.backup_page_local_backup_import)) },
+                        text = { Text(stringResource(R.string.backup_page_import_overwrite_confirm)) },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    showImportConfirm = false
+                                    importLauncher.launch(arrayOf("application/zip"))
+                                }
+                            ) {
+                                Text(stringResource(R.string.confirm))
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showImportConfirm = false }) {
+                                Text(stringResource(R.string.cancel))
+                            }
+                        },
+                    )
+                }
+
+                if (restoreStaged) {
+                    BackupDialog()
+                }
+
+                pendingClearKey?.let { key ->
+                    AlertDialog(
+                        onDismissRequest = { pendingClearKey = null },
+                        title = { Text("Clear ${storedFieldLabel(key)}?") },
+                        text = {
+                            Text(
+                                "This data is large enough to make the app run out of memory. " +
+                                    "Clearing resets it to the default and cannot be undone."
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    pendingClearKey = null
+                                    clearing = true
+                                    scope.launch {
+                                        try {
+                                            settingsStore.resetStoredField(key)
+                                        } finally {
+                                            clearing = false
+                                        }
+                                    }
+                                }
+                            ) {
+                                Text("Clear", color = MaterialTheme.colorScheme.error)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { pendingClearKey = null }) { Text("Cancel") }
+                        },
+                    )
+                }
+
                 if (showAssistantPicker) {
                     AssistantPickerSheet(
                         settings = settings,
@@ -175,6 +388,14 @@ class SafeModeActivity : ComponentActivity() {
             }
         }
     }
+}
+
+// 认得的 key 显示成界面上的名字，其余直接显示 key
+@Composable
+private fun storedFieldLabel(key: String): String = when (key) {
+    SettingsStore.LOREBOOKS.name -> stringResource(R.string.prompt_page_lorebook_tab)
+    SettingsStore.ASSISTANTS.name -> stringResource(R.string.safe_mode_assistants)
+    else -> key
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
